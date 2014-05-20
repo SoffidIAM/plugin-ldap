@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<?component name="input_criteri" macro-uri="comu/input_criteri.zul"?>
+<?component name="input_dada" macro-uri="comu/input_dada.zul"?>
+<?component name="input_etiqueta" macro-uri="comu/input_etiqueta.zul"?>
+<?component name="input_password" macro-uri="comu/input_password.zul"?>
+
+<grid width="99%">
+	<columns visible="false"><column width="14%"/><column/> </columns>
+	<rows>
+		<row>
+			<input_etiqueta value="User name" />
+			<hbox width="90%">
+				<input_dada bind="@param0" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+			</hbox>
+		</row>
+		<row>
+			<input_etiqueta value="Password" />
+			<hbox width="90%">
+				<input_password bind="@param1" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+			</hbox>
+		</row>
+		<row>
+			<input_etiqueta value="Host name" />
+			<hbox width="90%">
+				<input_dada bind="@param2" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+			</hbox>
+		</row>
+		<row>
+			<input_etiqueta value="PasswordAttribute" />
+			<vbox width="90%">
+				<input_dada bind="@param3" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+				<label value="e.g. userPassword"/>
+			</vbox>
+		</row>
+		<row>
+			<input_etiqueta value="Password hash algorightm" />
+			<vbox width="90%">
+				<input_dada bind="@param4" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+				<label value="e.g. SHA"/>
+			</vbox>
+		</row>
+		<row>
+			<input_etiqueta value="Password hash prefix" />
+			<hbox width="90%">
+				<input_dada bind="@param5" lectura="${!canModifyAgent}"
+					width_custom="98%" />
+				<label value="e.g. {SHA}"/>
+			</hbox>
+		</row>
+	</rows>
+</grid>
