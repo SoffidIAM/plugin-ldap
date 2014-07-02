@@ -84,6 +84,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	ObjectTranslator objectTranslator = null;
 	
 	private static final long serialVersionUID = 1L;
+	boolean debugEnabled;
 
 	// constante de máximo número de miembros de un grupo (evitar timeout)
 	private static final int MAX_GROUP_MEMBERS = 5000;
@@ -98,6 +99,8 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	String password;
 	/** HOST donde se aloja LDAP */
 	String ldapHost;
+	/** Base DN **/
+	String baseDN;
 	/** ofuscador de claves SHA */
 	MessageDigest digest;
 
@@ -119,6 +122,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	// --------------------------------------------------------------
 	static Hashtable pool = new Hashtable();
 
+	int pagesize;
 	/**
 	 * Constructor
 	 * 
@@ -148,7 +152,20 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		passwordPrefix = getDispatcher().getParam5();
 		if (passwordPrefix == null)
 			hashType = "{" + hashType + "}";
+		
+		baseDN = getDispatcher().getParam7();
+		
+		debugEnabled = "true".equals(getDispatcher().getParam8());
 
+		try {
+			if (getDispatcher().getParam6() == null || 
+					getDispatcher().getParam6().trim().length() == 0)
+				pagesize = 100;
+			else
+				pagesize = Integer.parseInt(getDispatcher().getParam6());
+		} catch (NumberFormatException e) {
+			throw new InternalErrorException ("Wrong numeric value "+getDispatcher().getParam6());
+		}
 		try {
 			digest = MessageDigest.getInstance(hashType);
 		} catch (java.security.NoSuchAlgorithmException e) {
@@ -200,6 +217,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 									.size()];
 							mods = new LDAPModification[modList.size()];
 							mods = (LDAPModification[]) modList.toArray(mods);
+							debugModifications("Modifying password ", dn, mods);
 							getConnection().modify(dn, mods);
 							log.info(
 									"UpdateUserPassword - setting password for user {}",
@@ -228,6 +246,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		}
 	}
 
+	LDAPConnection conn = null;
 	/**
 	 * obtiene conexión con el directorio LDAP
 	 * 
@@ -236,8 +255,6 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	 */
 	@SuppressWarnings("unchecked")
 	private LDAPConnection getConnection() throws InternalErrorException {
-		LDAPConnection conn = (LDAPConnection) pool.get(getDispatcher()
-				.getCodi());
 		if (conn != null && !conn.isConnectionAlive()) {
 			cerrarConexion();
 			conn = null;
@@ -247,7 +264,6 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				conn = new LDAPConnection();
 				conn.connect(ldapHost, ldapPort);
 				conn.bind(ldapVersion, loginDN, password.getBytes("UTF8"));
-				pool.put(getDispatcher().getCodi(), conn);
 			} catch (Exception e) {
 				String msg = "getConnection(): Error en la conexión con LDAP. ["
 						+ e.getMessage() + "]";
@@ -330,6 +346,8 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		{
 			return vom.toStringArray((Object[])obj);
 		}
+		else if ("".equals(obj))
+			return null;
 		else
 		{
 			return new String[] { vom.toString(obj) };
@@ -347,21 +365,31 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	public void updateObjects(String accountName, ExtensibleObjects objects)
 			throws InternalErrorException {
 
-		for (ExtensibleObject object : objects.getObjects()) {
-			String dn = vom.toString(object.getAttribute("dn"));
+		for (ExtensibleObject obj : objects.getObjects()) {
+			String dn = vom.toString(obj.getAttribute("dn"));
 			try {
 				if (dn != null) {
 					log.info("Updating object {}", dn, null);
 					LDAPEntry entry = buscarUsuario(dn);
 					if (entry == null) {
+						if (debugEnabled)
+						{
+							log.info("================================================");
+							log.info("Creating object "+dn);
+						}
 						LDAPAttributeSet attributeSet = new LDAPAttributeSet();
-						for (String attribute : object.getAttributes()) {
-							String values[] = toStringArray(object.getAttribute(attribute));
+						for (String attribute : obj.getAttributes()) {
+							String values[] = toStringArray(obj.getAttribute(attribute));
 							if (values != null && !"dn".equals(attribute))
 							{
-								attributeSet.add(new LDAPAttribute(attribute,values	));
+								LDAPAttribute att = new LDAPAttribute(attribute,values);
+								attributeSet.add(att);
+								if (debugEnabled)
+									debugAttribute(LDAPModification.ADD, att);
 							}
 						}
+						if (debugEnabled)
+							log.info("================================================");
 						entry = new LDAPEntry(dn, attributeSet);
 						getConnection().add(entry);
 						if (accountName != null) {
@@ -378,10 +406,13 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 						}
 					} else {
 						LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
-						for (String attribute : object.getAttributes()) {
+						for (String attribute : obj.getAttributes()) {
 							if (!"dn".equals(attribute) &&  !"objectClass".equals(attribute))
 							{
-								String[] value = toStringArray(object.getAttribute(attribute));
+								Object v = obj.getAttribute (attribute);
+								String[] value = toStringArray(obj.getAttribute(attribute));
+								if (value != null && value.length == 1 && value[0].trim().length() == 0)
+									value = null;
 								if (value == null
 										&& entry.getAttribute(attribute) != null) {
 									modList.add(new LDAPModification(
@@ -394,9 +425,33 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 											new LDAPAttribute(attribute, value)));
 								} else if (value != null
 										&& entry.getAttribute(attribute) != null) {
-									modList.add(new LDAPModification(
-											LDAPModification.REPLACE,
-											new LDAPAttribute(attribute, value)));
+									if (v instanceof byte[])
+										modList.add(new LDAPModification(
+												LDAPModification.REPLACE,
+												new LDAPAttribute(attribute, (byte[])v)));
+									else
+									{
+										boolean update = false;
+										String []oldvalue = entry.getAttribute(attribute).getStringValueArray();
+										if (value.length != oldvalue.length)
+											update = true;
+										else
+										{
+											for (int i = 0;i < value.length; i++)
+											{
+												if (!value[i].equals(oldvalue[i]))
+												{
+													update = true;
+													break;
+												}
+											}
+											if (update)
+												modList.add(new LDAPModification(
+														LDAPModification.REPLACE,
+														new LDAPAttribute(attribute, value)));
+										}
+										
+									}
 								}
 							}
 						}
@@ -404,6 +459,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 								.size()];
 						mods = new LDAPModification[modList.size()];
 						mods = (LDAPModification[]) modList.toArray(mods);
+						debugModifications("Modifying", dn, mods);
 						getConnection().modify(dn, mods);
 					}
 				}
@@ -460,18 +516,56 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	public Collection<ExtensibleObject> findObjects(ExtensibleObject objectQuery)
 			throws RemoteException, InternalErrorException {
-		String dn = vom.toString(objectQuery.getAttribute("dn"));
 		StringBuffer buf = new StringBuffer ();
+		buildQuery(objectQuery, buf);
+		try {
+			Collection<ExtensibleObject> objs = new LinkedList<ExtensibleObject>(); 
+			LDAPSearchResults query = getConnection().search(baseDN, LDAPConnection.SCOPE_SUB, buf.toString(), null, false);
+			while (query.hasMore())
+			{
+				try {
+					LDAPEntry entry = query.next();
+					ExtensibleObject obj = new ExtensibleObject();
+					obj.setAttribute("dn", entry.getDN());
+					for (Object attrName: entry.getAttributeSet())
+					{
+						LDAPAttribute attribute = entry.getAttribute((String) attrName);
+						if (attribute.getStringValueArray().length == 0)
+							obj.setAttribute((String) attrName, attribute.getStringValue());
+						else
+							obj.setAttribute((String) attrName, attribute.getStringValueArray());
+					}
+					objs.add(obj);
+				} catch (LDAPException e) 
+				{
+					if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+						break;
+					else
+						throw e;
+				}
+			}
+			return objs;
+		} catch (LDAPException e) {
+			String msg = "error search objects : " + baseDN+": "+buf.toString();
+			log.warn(msg, e);
+			throw new InternalErrorException(msg, e);
+		}
+		
+	}
+
+	private boolean buildQuery(ExtensibleObject objectQuery, StringBuffer buf) {
+		boolean any = false;
 		for (String attribute : objectQuery.getAttributes()) {
 			if (! attribute.equals("dn"))
 			{
 				String [] values = toStringArray(objectQuery.getAttribute(attribute));
-				if (values.length > 0)
+				if (values != null && values.length > 0)
 				{
+					any = true;
 					if (buf.length() == 0)
-						buf.append ("(& ");
+						buf.append ("(&");
 					if (values.length > 1)
-						buf.append ("(| ");
+						buf.append ("(|");
 					for (String value: values)
 					{
 						buf.append ("(")
@@ -488,31 +582,10 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		
 		if (buf.length() > 0)
 			buf.append (")");
-		try {
-			Collection<ExtensibleObject> objs = new LinkedList<ExtensibleObject>(); 
-			LDAPSearchResults query = getConnection().search(dn, LDAPConnection.SCOPE_SUB, buf.toString(), null, false);
-			while (query.hasMore())
-			{
-				LDAPEntry entry = query.next();
-				ExtensibleObject obj = new ExtensibleObject();
-				obj.setAttribute("dn", entry.getDN());
-				for (Object attrName: entry.getAttributeSet())
-				{
-					LDAPAttribute attribute = entry.getAttribute((String) attrName);
-					if (attribute.getStringValueArray().length == 0)
-						obj.setAttribute((String) attrName, attribute.getStringValue());
-					else
-						obj.setAttribute((String) attrName, attribute.getStringValueArray());
-				}
-				objs.add(obj);
-			}
-			return objs;
-		} catch (LDAPException e) {
-			String msg = "updating object : " + dn;
-			log.warn(msg, e);
-			throw new InternalErrorException(msg, e);
-		}
 		
+		if (debugEnabled)
+			log.info("Performing query "+buf.toString());
+		return any;
 	}
 
 	AttributeMapping findAttribute (ExtensibleObjectMapping objectMapping, String attribute)
@@ -543,80 +616,70 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				ExtensibleObject dummySystemObject = objectTranslator.generateObject(dummySoffidObj, mapping, true);
 				
 				StringBuffer sb = new StringBuffer();
-				sb.append ("(&");
-				boolean any = false;
-				String base = null;
-				for (String att: dummySystemObject.getAttributes())
-				{
-					String value = vom.toSingleString(dummySystemObject.getAttribute(att));
-					if ("dn".equals(att))
-					{
-						base = removeIncompleteComponentsFromBase(value);
-					}
-					else
-					{
-						if (value != null)
-						{
-							sb.append ("(")
-								.append (att)
-								.append("=")
-								.append(value)
-								.append(")");
-							any = true;
-						}
-					}
-				}
+				boolean any = buildQuery(dummySystemObject, sb);
 				
-				sb.append(")");
-				
-				if (any && base != null)
+				if (any)
 				{
 					LDAPConnection lc = getConnection();
 					LDAPSearchConstraints oldConst = lc.getSearchConstraints();	// Save search constraints
-					LDAPPagedResultsControl pageResult =
-							new LDAPPagedResultsControl(100, false);
+					LDAPPagedResultsControl pageResult = null;
+					if (pagesize > 0)
+						pageResult =
+							new LDAPPagedResultsControl(pagesize,  false);
 
 					do
 					{
 						LDAPSearchConstraints constraints = lc.getSearchConstraints();
-						constraints.setControls(pageResult);
+						if (pageResult != null)
+							constraints.setControls(pageResult);
+						constraints.setMaxResults(0);
 						lc.setConstraints(constraints);
 
-						LDAPSearchResults searchResults = lc.search(base, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
+						LDAPSearchResults searchResults = lc.search(baseDN, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
 
 						// Process results
 						while (searchResults.hasMore())
 						{
-							LDAPEntry entry = searchResults.next();
-							ExtensibleObject eo = parseEntry (entry, mapping);
-							ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
-							for (ExtensibleObject eo2: parsed.getObjects())
-							{
-								Account account = vom.parseAccount(eo2);
-								if (account != null)
-									accounts.add(account.getName());
+							try {
+								System.out.println ("Accounts : "+accounts.size()+ " ");
+								LDAPEntry entry = searchResults.next();
+								ExtensibleObject eo = parseEntry (entry, mapping);
+								ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
+								for (ExtensibleObject eo2: parsed.getObjects())
+								{
+									Account account = vom.parseAccount(eo2);
+									if (account != null)
+										accounts.add(account.getName());
+								}
+							} catch (LDAPException e) {
+								if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+									break;
+								else
+									throw e;
 							}
 						}
 
-						LDAPControl responseControls[] = searchResults.getResponseControls();
-						pageResult.setCookie(null); // in case no cookie is returned we need
-																				// to step out of do..while
-
-						if (responseControls != null)
+						if (pageResult != null)
 						{
-							for (int i = 0; i < responseControls.length; i++)
+							LDAPControl responseControls[] = searchResults.getResponseControls();
+							pageResult.setCookie(null); // in case no cookie is returned we need
+																					// to step out of do..while
+	
+							if (responseControls != null)
 							{
-								if (responseControls[i] instanceof LDAPPagedResultsResponse)
+								for (int i = 0; i < responseControls.length; i++)
 								{
-									LDAPPagedResultsResponse response =
-											(LDAPPagedResultsResponse) responseControls[i];
-									pageResult.setCookie(response.getCookie());
+									if (responseControls[i] instanceof LDAPPagedResultsResponse)
+									{
+										LDAPPagedResultsResponse response =
+												(LDAPPagedResultsResponse) responseControls[i];
+										pageResult.setCookie(response.getCookie());
+									}
 								}
 							}
 						}
-					} while (pageResult.getCookie() != null);
-					lc.getSearchConstraints().setControls(new LDAPControl[0]);
-
+					} while (pageResult != null && pageResult.getCookie() != null);
+					getConnection().setConstraints(oldConst);
 				}
 			}
 		}
@@ -641,84 +704,75 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				ExtensibleObject dummySystemObject = objectTranslator.generateObject(dummySoffidObj, mapping, true);
 				
 				StringBuffer sb = new StringBuffer();
-				sb.append ("(&");
-				boolean any = false;
-				String base = null;
-				for (String att: dummySystemObject.getAttributes())
-				{
-					String value = vom.toSingleString(dummySystemObject.getAttribute(att));
-					if ("dn".equals(att))
-					{
-						base = removeIncompleteComponentsFromBase(value);
-					}
-					else
-					{
-						if (value != null)
-						{
-							sb.append ("(")
-								.append (att)
-								.append("=")
-								.append(value)
-								.append(")");
-							any = true;
-						}
-					}
-				}
+				boolean any = buildQuery(dummySystemObject, sb);
 				
-				sb.append(")");
-				
-				if (any && base != null)
+				if (any)
 				{
 					LDAPConnection lc = getConnection();
 					LDAPSearchConstraints oldConst = lc.getSearchConstraints();	// Save search constraints
-					LDAPPagedResultsControl pageResult =
-							new LDAPPagedResultsControl(count, false);
+					LDAPPagedResultsControl pageResult = null;
+					if (count > 0)
+						pageResult =
+							new LDAPPagedResultsControl(count,  false);
 			
 
 					do
 					{
 						LDAPSearchConstraints constraints = lc.getSearchConstraints();
-						constraints.setControls(pageResult);
+						if (pageResult != null) constraints.setControls(pageResult);
 						constraints.setMaxResults(0);
 						lc.setConstraints(constraints);
 
-						LDAPSearchResults searchResults = lc.search(base, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
+						
+						log.debug("Searching for "+sb.toString()+" on "+baseDN);
+						
+						LDAPSearchResults searchResults = lc.search(baseDN, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
 
 						// Process results
 						while (searchResults.hasMore())
 						{
-							LDAPEntry entry = searchResults.next();
-							if (!start)
+							try {
+								LDAPEntry entry = searchResults.next();
+								if (!start)
+								{
+									if (entry.getDN().equals(first))
+										start = true;
+								}
+								else
+								{
+									ExtensibleObject eo = parseEntry (entry, mapping);
+									objects.add(eo);
+									if (count -- == 0)
+										break;
+								}
+							} 
+							catch (LDAPException e) 
 							{
-								if (entry.getDN().equals(first))
-									start = true;
-							}
-							else
-							{
-								ExtensibleObject eo = parseEntry (entry, mapping);
-								objects.add(eo);
-								if (count -- == 0)
+								if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
 									break;
+								else
+									throw e;
 							}
 						}
 
-						LDAPControl responseControls[] = searchResults.getResponseControls();
-						pageResult.setCookie(null); // in case no cookie is returned we need
-																				// to step out of do..while
-
-						if (responseControls != null)
+						if (pageResult != null)
 						{
-							for (int i = 0; i < responseControls.length; i++)
+							LDAPControl responseControls[] = searchResults.getResponseControls();
+							pageResult.setCookie(null); // in case no cookie is returned we need
+							if (responseControls != null)
 							{
-								if (responseControls[i] instanceof LDAPPagedResultsResponse)
+								for (int i = 0; i < responseControls.length; i++)
 								{
-									LDAPPagedResultsResponse response =
-											(LDAPPagedResultsResponse) responseControls[i];
-									pageResult.setCookie(response.getCookie());
+									if (responseControls[i] instanceof LDAPPagedResultsResponse)
+									{
+										LDAPPagedResultsResponse response =
+												(LDAPPagedResultsResponse) responseControls[i];
+										pageResult.setCookie(response.getCookie());
+									}
 								}
 							}
 						}
-					} while (pageResult.getCookie() != null && count > 0);
+					} while (pageResult != null && pageResult.getCookie() != null && count > 0);
 					lc.getSearchConstraints().setControls(new LDAPControl[0]);
 				}
 			}
@@ -749,6 +803,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			cerrarConexion();
 			throw new InternalErrorException ("Error getting accounts list", e);
 		}
+		boolean x = true;
 		return new LinkedList<String>(accounts);
 	}
 
@@ -816,7 +871,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		// For each suitable mappping
 		for (ExtensibleObjectMapping objectMapping: objectMappings)
 		{
-			if (objectMapping.getSoffidObject().equals(example.getObjectType()))
+			if (objectMapping.getSoffidObject().toString().equals(example.getObjectType()))
 			{
 				// Generate system objects from source user
 				ExtensibleObject systemObject = objectTranslator.generateObject(example, objectMapping, true);
@@ -840,44 +895,16 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			InternalErrorException {
 		Set<String>roles = new HashSet<String>();
 		try {
-			Pattern constantPattern = Pattern.compile("\\s*\"(.*)\"\\s*");
-			Pattern constantPattern2 = Pattern.compile("\\s*\"(.*)\"\\s*.*");
-			for (ExtensibleObjectMapping mapping: objectMappings )
+			for (ExtensibleObject eo: getLdapObjects(SoffidObjectType.OBJECT_ROLE, null, 0))
 			{
-				if (mapping.getSoffidObject().equals(SoffidObjectType.OBJECT_ROLE))
+				ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
+				for (ExtensibleObject parsedObject : parsed.getObjects())
 				{
-					AttributeMapping attMapping = findAttribute(mapping, "objectType");
-					AttributeMapping baseMapping = findAttribute(mapping, "dn");
-						
-					if (attMapping != null && baseMapping != null)
-					{
-						Matcher matcher = constantPattern.matcher(attMapping.getSoffidAttribute());
-						if (matcher.matches())
-						{
-							Matcher matcher2 = constantPattern2.matcher(baseMapping.getSoffidAttribute());
-							if (matcher2.matches())
-							{
-								String objectType=matcher.group(1).trim();
-								String base= matcher2.group(1).trim();
-								base = removeIncompleteComponentsFromBase(base);
-									
-								LDAPSearchResults found = getConnection().search(base, LDAPConnection.SCOPE_SUB, "(objectType="+objectType+")", null, true);
-								while (found.hasMore())
-								{
-									LDAPEntry entry = found.next();
-									ExtensibleObject eo = parseEntry (entry, mapping);
-									ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
-									for (ExtensibleObject parsedObject : parsed.getObjects())
-									{
-										Rol rol = vom.parseRol(parsedObject);
-										if (rol != null)
-											roles.add (rol.getNom());
-									}
-								}
-							}
-						}
-					}
+					Rol rol = vom.parseRol(parsedObject);
+					if (rol != null)
+						roles.add (rol.getNom());
 				}
+				
 			}
 		} catch (LDAPException e) {
 			cerrarConexion();
@@ -939,38 +966,41 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	private boolean populateRolesFromUser(String userAccount, List<Rol> roles) throws InternalErrorException 
 	{
-		boolean found = true;
+		boolean found = false;
 		ExtensibleObject userObject = findExtensibleUser(userAccount);
-		ExtensibleObjects soffidObjects = objectTranslator.parseInputObjects(userObject);
-		for (ExtensibleObject soffidObject:soffidObjects.getObjects())
+		if (userObject != null)
 		{
-			List<Map<String,Object>>grantedRoles = (List<Map<String, Object>>) soffidObject.get("grantedRoles");
-			if (grantedRoles != null)
+			ExtensibleObjects soffidObjects = objectTranslator.parseInputObjects(userObject);
+			for (ExtensibleObject soffidObject:soffidObjects.getObjects())
 			{
-				for (Map<String,Object> grantedRole: grantedRoles)
+				List<Map<String,Object>>grantedRoles = (List<Map<String, Object>>) soffidObject.get("grantedRoles");
+				if (grantedRoles != null)
 				{
-					Rol rol = new Rol ();
-					rol.setBaseDeDades(getDispatcher().getCodi());
-					rol.setNom(vom.toSingleString(grantedRole.get("grantedRole")));
-					rol.setDescripcio(rol.getNom()+" Auto generated");
-					roles.add (rol);
+					for (Map<String,Object> grantedRole: grantedRoles)
+					{
+						Rol rol = new Rol ();
+						rol.setBaseDeDades(getDispatcher().getCodi());
+						rol.setNom(vom.toSingleString(grantedRole.get("grantedRole")));
+						rol.setDescripcio(rol.getNom()+" Auto generated");
+						roles.add (rol);
+					}
+					found = true;
 				}
-				found = true;
-			}
-			List<String> granted = (List<String>) soffidObject.get("granted");
-			if (granted != null)
-			{
-				for (String grantedRole: granted)
+				List<String> granted = (List<String>) soffidObject.get("granted");
+				if (granted != null)
 				{
-					Rol rol = new Rol ();
-					rol.setBaseDeDades(getDispatcher().getCodi());
-					rol.setNom(grantedRole);
-					rol.setDescripcio(rol.getNom()+" Auto generated");
-					roles.add (rol);
+					for (String grantedRole: granted)
+					{
+						Rol rol = new Rol ();
+						rol.setBaseDeDades(getDispatcher().getCodi());
+						rol.setNom(grantedRole);
+						rol.setDescripcio(rol.getNom()+" Auto generated");
+						roles.add (rol);
+					}
+					found = true;
 				}
-				found = true;
+				
 			}
-			
 		}
 		
 		return found;
@@ -988,56 +1018,48 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		List<Map<String,Object> > userMapList = new LinkedList<Map<String,Object>>();
 		userMapList.add(userMap);
 		rolObject.setAttribute("allGrantedAccounts",  userMap);
+		rolObject.setAttribute("grantedAccounts",  userMap);
+		List<String> accountNames = new LinkedList<String>();
+		accountNames.add(userAccount);
+		rolObject.setAttribute("allGrantedAccountNames", accountNames);
+		rolObject.setAttribute("grantedAccountNames", accountNames);
 		
 		// Generate a dummy object to perform query
 		ExtensibleObjects systemObjects = objectTranslator.generateObjects(rolObject);
 		for (ExtensibleObject systemObject: systemObjects.getObjects())
 		{
 			StringBuffer sb = new StringBuffer();
+			
 			sb.append ("(&");
-			boolean any = false;
-			String base = null;
-			for (String att: systemObject.getAttributes())
+			boolean any = buildQuery(systemObject, sb);
+			if (any && baseDN != null)
 			{
-				String value = vom.toSingleString(systemObject.getAttribute(att));
-				if ("dn".equals(att))
-				{
-					base = removeIncompleteComponentsFromBase(value);
-				}
-				else
-				{
-					if (value != null)
-					{
-						sb.append ("(")
-							.append (att)
-							.append("=")
-							.append(value)
-							.append(")");
-						any = true;
-					}
-				}
-			}
-			sb.append(")");
-			if (any && base != null)
-			{
-				LDAPSearchResults search = getConnection().search(base, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
+				LDAPSearchResults search = getConnection().search(baseDN, LDAPConnection.SCOPE_SUB, sb.toString(), null, false);
 				while (search.hasMore())
 				{
-					LDAPEntry roleEntry = search.next();
-					for (ExtensibleObjectMapping objectMapping: objectMappings)
-					{
-						if (objectMapping.getSoffidObject().equals (SoffidObjectType.OBJECT_ROLE))
+					try {
+						LDAPEntry roleEntry = search.next();
+						for (ExtensibleObjectMapping objectMapping: objectMappings)
 						{
-							ExtensibleObject roleObject = parseEntry(roleEntry, objectMapping);
-							ExtensibleObject soffidObject = objectTranslator.parseInputObject(roleObject, objectMapping);
-							Rol rol = vom.parseRol(soffidObject);
-							if (rol != null)
+							if (objectMapping.getSoffidObject().equals (SoffidObjectType.OBJECT_ROLE))
 							{
-								roles.add(rol);
+								ExtensibleObject roleObject = parseEntry(roleEntry, objectMapping);
+								ExtensibleObject soffidObject = objectTranslator.parseInputObject(roleObject, objectMapping);
+								Rol rol = vom.parseRol(soffidObject);
+								if (rol != null)
+								{
+									roles.add(rol);
+								}
 							}
 						}
+						found = true;
+					} catch (LDAPException e) 
+					{
+						if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+							break;
+						else
+							throw e;
 					}
-					found = true;
 					
 				}
 			}
@@ -1167,11 +1189,10 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			throws InternalErrorException {
 		Collection<AuthoritativeChange> changes = new LinkedList<AuthoritativeChange>();
 		try {
-			LinkedList<ExtensibleObject> objects = getLdapObjects(SoffidObjectType.OBJECT_USER, firstChange, 150);
+			LinkedList<ExtensibleObject> objects = getLdapObjects(SoffidObjectType.OBJECT_USER, firstChange, pagesize);
 			if (objects.isEmpty())
 			{
 				firstChange = null;
-				objects = getLdapObjects(SoffidObjectType.OBJECT_USER, firstChange, 10);
 			}
 			
 			for (ExtensibleObject ldapObject: objects)
@@ -1247,6 +1268,41 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	public void commitChange(AuthoritativeChangeIdentifier id)
 			throws InternalErrorException {
+	}
+	
+	public void debugModifications (String action, String dn, LDAPModification mods[])
+	{
+		if (debugEnabled)
+		{
+			log.info ("=========================================================");
+			log.info(action + " object "+dn);
+			for (int i = 0; i < mods.length; i++)
+			{
+				LDAPModification mod = mods[i];
+				debugAttribute(mod.getOp(), mod.getAttribute());
+			}
+			log.info ("=========================================================");
+		}
+	}
+
+	private void debugAttribute(int op, LDAPAttribute ldapAttribute) {
+		String attAction = op == LDAPModification.ADD ? "ADD" :
+			op == LDAPModification.DELETE? "DELETE": "REPLACE";
+		StringBuffer b = new StringBuffer(attAction);
+		b.append (" ")
+			.append (ldapAttribute.getName());
+		if (op != LDAPModification.DELETE)
+		{
+			b.append (" = [");
+			String[] v = ldapAttribute.getStringValueArray();
+			for (int j = 0; j < v.length; j++)
+			{
+				if (j > 0) b.append (", ");
+				b.append (v[j]);
+			}
+			b.append ("]");
+		}
+		log.info(b.toString());
 	}
 }
 	

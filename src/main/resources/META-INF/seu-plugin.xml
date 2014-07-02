@@ -41,9 +41,9 @@
 				direction="out" />
 			<mapping soffidAttribute='primaryGroup' systemAttribute='departmentNumber == null ? "enterprise" : departmentNumber'
 				direction="in" />
-			<mapping soffidAttribute='attribute{"employeeNumber"}' systemAttribute='employeeNumber'
+			<mapping soffidAttribute='attributes{"employeeNumber"}' systemAttribute='employeeNumber'
 							direction="inout" />
-			<mapping soffidAttribute='attribute{"employeeType"}' systemAttribute='employeeType'
+			<mapping soffidAttribute='attributes{"employeeType"}' systemAttribute='employeeType'
 							direction="inout" />
 
 		</object>
@@ -56,7 +56,7 @@
 				systemAttribute='dn' direction="out" />
 			<mapping soffidAttribute='accountName' systemAttribute='cn'
 				direction="inout" />
-			<mapping soffidAttribute='description' systemAttribute='sn'
+			<mapping soffidAttribute='accountDescription' systemAttribute='sn'
 				direction="inout" />
 		</object>
 
