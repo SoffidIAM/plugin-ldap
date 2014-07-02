@@ -23,6 +23,9 @@
       <version>1.4.0</version>
     </dependency>
   </dependencies>
+  <scm>
+        <connection>scm:git:ssh://git@stash.dev.lab:7999/iam2/plugin-ldap.git</connection>
+  </scm>
   <licenses>
     <license>
       <name>GNU GPL Version 3.0</name>
