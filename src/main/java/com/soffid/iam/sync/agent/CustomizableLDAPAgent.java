@@ -57,7 +57,7 @@ import es.caib.seycon.ng.sync.engine.extobj.UserExtensibleObject;
 import es.caib.seycon.ng.sync.engine.extobj.ValueObjectMapper;
 import es.caib.seycon.ng.sync.intf.AuthoritativeChange;
 import es.caib.seycon.ng.sync.intf.AuthoritativeChangeIdentifier;
-import es.caib.seycon.ng.sync.intf.AuthoritativeIdentitySource;
+import es.caib.seycon.ng.sync.intf.AuthoritativeIdentitySource2;
 import es.caib.seycon.ng.sync.intf.ExtensibleObject;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMapping;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMgr;
@@ -77,7 +77,7 @@ import es.caib.seycon.util.Base64;
  */
 
 public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr, UserMgr, ReconcileMgr, RoleMgr,
-	AuthoritativeIdentitySource {
+	AuthoritativeIdentitySource2 {
 
 	ValueObjectMapper vom = new ValueObjectMapper();
 	
@@ -102,7 +102,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	/** Base DN **/
 	String baseDN;
 	/** ofuscador de claves SHA */
-	MessageDigest digest;
+	MessageDigest digest = null;
 
 	String usersContext;
 	String rolesContext;
@@ -167,7 +167,8 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			throw new InternalErrorException ("Wrong numeric value "+getDispatcher().getParam6());
 		}
 		try {
-			digest = MessageDigest.getInstance(hashType);
+			if (hashType != null && hashType.length() > 0)
+				digest = MessageDigest.getInstance(hashType);
 		} catch (java.security.NoSuchAlgorithmException e) {
 			throw new InternalErrorException(
 					"Unable to use SHA encryption algorithm ", e);
@@ -325,11 +326,16 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	 */
 	private String getHashPassword(Password password) {
 		String hash = null;
-		synchronized (digest) {
-			hash = passwordPrefix
-					+ Base64.encodeBytes(
-							digest.digest(password.getPassword().getBytes()),
-							Base64.DONT_BREAK_LINES);
+		if (digest == null)
+			hash = password.getPassword();
+		else
+		{
+			synchronized (digest) {
+				hash = passwordPrefix
+						+ Base64.encodeBytes(
+								digest.digest(password.getPassword().getBytes()),
+								Base64.DONT_BREAK_LINES);
+			}
 		}
 		return hash;
 	}
@@ -1185,7 +1191,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	}
 
 	private String firstChange = null;
-	public Collection<AuthoritativeChange> getChanges()
+	public Collection<AuthoritativeChange> getChanges(String nextChange)
 			throws InternalErrorException {
 		Collection<AuthoritativeChange> changes = new LinkedList<AuthoritativeChange>();
 		try {
@@ -1245,7 +1251,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 						Object attributes = object.getAttribute("attributes");
 						if (attributes instanceof Map)
 						{
-							Map<String,String> attributesMap = new HashMap<String, String>();
+							Map<String,Object> attributesMap = new HashMap<String, Object>();
 							for (Object attributeName: ((Map)attributes).keySet())
 							{
 								attributesMap.put((String)attributeName, (String) vom.toSingleString(((Map)attributes).get(attributeName)));
@@ -1266,10 +1272,6 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		return changes;
 	}
 
-	public void commitChange(AuthoritativeChangeIdentifier id)
-			throws InternalErrorException {
-	}
-	
 	public void debugModifications (String action, String dn, LDAPModification mods[])
 	{
 		if (debugEnabled)
@@ -1303,6 +1305,14 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			b.append ("]");
 		}
 		log.info(b.toString());
+	}
+
+	public boolean hasMoreData() throws InternalErrorException {
+		return firstChange != null;
+	}
+
+	public String getNextChange() throws InternalErrorException {
+		return null;
 	}
 }
 	
