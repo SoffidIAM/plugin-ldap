@@ -1203,13 +1203,17 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			
 			for (ExtensibleObject ldapObject: objects)
 			{
+				debugObject("LDAP Object", ldapObject, "");
 				firstChange = vom.toSingleString(ldapObject.getAttribute("dn"));
 				ExtensibleObjects parsedObjects = objectTranslator.parseInputObjects(ldapObject);
 				for (ExtensibleObject object: parsedObjects.getObjects())
 				{
+					debugObject("Parsed Object", object, "");
 					Usuari user = vom.parseUsuari(object);
 					if (user != null)
 					{
+						if (debugEnabled)
+							log.info("Resulting object. "+user.toString());
 						AuthoritativeChange change = new AuthoritativeChange();
 						
 						AuthoritativeChangeIdentifier id = new AuthoritativeChangeIdentifier();
@@ -1313,6 +1317,33 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	public String getNextChange() throws InternalErrorException {
 		return null;
+	}
+
+	void debugObject (String msg, Map<String,Object> obj, String indent)
+	{
+		if (debugEnabled)
+		{
+			if (msg != null)
+				log.info(indent + msg);
+			for (String attribute: obj.keySet())
+			{
+				Object subObj = obj.get(attribute);
+				if (subObj == null)
+				{
+					log.info (indent+attribute.toString()+": null");
+				}
+				else if (subObj instanceof Map)
+				{
+					log.info (indent+attribute.toString()+": Object {");
+					debugObject (null, (Map<String, Object>) subObj, indent + "   ");
+					log.info (indent+"}");
+				}
+				else
+				{
+					log.info (indent+attribute.toString()+": "+subObj.toString());
+				}
+			}
+		}
 	}
 }
 	
