@@ -134,7 +134,9 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	public CustomizableLDAPAgent() throws RemoteException {
 	}
 
-	static LDAPPool pool = new LDAPPool();
+	static HashMap<String,LDAPPool> pools = new HashMap<String, LDAPPool>();
+	
+	LDAPPool pool ;
 	
 	@Override
 	public void init() throws InternalErrorException {
@@ -175,6 +177,12 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 					"Unable to use SHA encryption algorithm ", e);
 		}
 
+		pool = pools.get(getCodi());
+		if ( pool == null)
+		{
+			pool = new LDAPPool();
+			pools.put(getCodi(), pool);
+		}
 		pool.setBaseDN(baseDN);
 		pool.setLdapHost(ldapHost);
 		pool.setLdapPort(ldapPort);
@@ -404,7 +412,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 													new LDAPAttribute(attribute, (byte[])v)));
 										else
 										{
-											boolean update = false;
+										boolean update = false;
 											String []oldvalue = entry.getAttribute(attribute).getStringValueArray();
 											if (value.length != oldvalue.length)
 												update = true;
@@ -418,22 +426,25 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 														break;
 													}
 												}
-												if (update)
-													modList.add(new LDAPModification(
-															LDAPModification.REPLACE,
-															new LDAPAttribute(attribute, value)));
 											}
+											if (update)
+												modList.add(new LDAPModification(
+														LDAPModification.REPLACE,
+														new LDAPAttribute(attribute, value)));
 											
 										}
 									}
 								}
 							}
-							LDAPModification[] mods = new LDAPModification[modList
-									.size()];
-							mods = new LDAPModification[modList.size()];
-							mods = (LDAPModification[]) modList.toArray(mods);
-							debugModifications("Modifying", dn, mods);
-							conn.modify(dn, mods);
+							if (modList.size() > 0)
+							{
+								LDAPModification[] mods = new LDAPModification[modList
+										.size()];
+								mods = new LDAPModification[modList.size()];
+								mods = (LDAPModification[]) modList.toArray(mods);
+								debugModifications("Modifying", dn, mods);
+								conn.modify(dn, mods);
+							}
 						}
 					}
 				} catch (Exception e) {

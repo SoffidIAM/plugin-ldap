@@ -125,7 +125,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 				{
 					try
 					{
-						return new LDAPAuthProvider(loginDN, password.getPassword()
+						return new LDAPAuthProvider(loginDN+ ", " + baseDN, password.getPassword()
 								.getBytes("UTF-8"));
 					}
 					catch (UnsupportedEncodingException e)
@@ -137,7 +137,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 			});
 			conn.setConstraints(constraints);
 			conn.connect(ldapHost, ldapPort);
-			conn.bind(ldapVersion, loginDN + ", " + baseDN, password.getPassword()
+			conn.bind(ldapVersion, loginDN , password.getPassword()
 					.getBytes("UTF8"));
 		}
 		catch (UnsupportedEncodingException e)
@@ -148,7 +148,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 		catch (LDAPException e)
 		{
 			throw new InternalErrorException("Failed to connect to LDAP: ("
-					+ loginDN + "/" + password.getPassword() + ")" + e.toString(), e);
+					+ loginDN + "/" + password.getPassword() + " host="+ldapHost+")" + e.toString(), e);
 		}
 		return (conn);
 	}
