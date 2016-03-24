@@ -36,7 +36,7 @@ import es.caib.seycon.ng.sync.intf.UserMgr;
  * @version $Revision: 1.5 $
  */
 
-public class LDAPAgent extends Agent implements MailAliasMgr, UserMgr, RoleMgr, GroupMgr {
+public class LDAPAgent extends Agent implements UserMgr, RoleMgr, GroupMgr {
 
 	private static final long serialVersionUID = 1L;
 	
@@ -413,9 +413,11 @@ public class LDAPAgent extends Agent implements MailAliasMgr, UserMgr, RoleMgr, 
 //							atributo));
 //				}
 				// Modificamos la dirección de correo
-				if (usuario.getNomCurt() != null) {
+				if (usuario.getNomCurt() != null && usuario.getNomCurt().trim().length() > 0) {
 					atributo = new LDAPAttribute("mail", textify(usuario.getNomCurt(), usuario.getDominiCorreu()));
-					modList.add(new LDAPModification(LDAPModification.REPLACE, atributo));					
+					modList.add(new LDAPModification(
+							Entry.getAttribute("mail") == null ? LDAPModification.ADD: LDAPModification.REPLACE, 
+									atributo));					
 				} else { // Si no té nom curt afegim el mail addicional.. si el té
 					// Si no té cap informació... no posem res (abans no se posava l'atribut)
 					try {
@@ -425,7 +427,9 @@ public class LDAPAgent extends Agent implements MailAliasMgr, UserMgr, RoleMgr, 
 						if (mailContacteDadesAddicionals!=null && mailContacteDadesAddicionals.getValorDada() != null &&
 								!"".equals(mailContacteDadesAddicionals.getValorDada().trim()) ) {
 							atributo = new LDAPAttribute("mail", mailContacteDadesAddicionals.getValorDada().trim());
-							modList.add(new LDAPModification(LDAPModification.REPLACE, atributo));
+							modList.add(new LDAPModification(
+									Entry.getAttribute("mail") == null ? LDAPModification.ADD: LDAPModification.REPLACE, 
+											atributo));
 						}
 					} catch (Throwable th) {
 						// Si dóna error, no posem res 
@@ -489,168 +493,8 @@ public class LDAPAgent extends Agent implements MailAliasMgr, UserMgr, RoleMgr, 
 	 */
 	@SuppressWarnings("unchecked")
 	public void updateUserAlias(String account, Usuari usuari) throws InternalErrorException  {
-		try {
-			LDAPEntry Entry = buscarUsuario(account);
-			@SuppressWarnings("rawtypes")
-			ArrayList modList = new ArrayList();
-			if (Entry != null) {
-				String dn = Entry.getDN();
-				if (usuari.getNomCurt() != null) {
-					LDAPAttribute atributo = new LDAPAttribute("mail",
-							textify(usuari.getNomCurt(), usuari.getDominiCorreu()));
-					modList.add(new LDAPModification(
-							LDAPModification.REPLACE, atributo));
-				} else {
-					// Primero buscamos su email de contacto:
-					boolean teMailContacte = false;
-					try {
-						DadaUsuari mailContacteDadesAddicionals = getServer()
-								.getUserData(usuari.getId(), "EMAIL");
-						// Que tinga valor l'atribut i q no siga buit
-						if (mailContacteDadesAddicionals != null
-								&& mailContacteDadesAddicionals.getValorDada() != null
-								&& !"".equals(mailContacteDadesAddicionals.getValorDada().trim())) {
-							LDAPAttribute atributo = new LDAPAttribute(
-									"mail", mailContacteDadesAddicionals.getValorDada().trim());
-							modList.add(new LDAPModification(
-									LDAPModification.REPLACE, atributo));
-							teMailContacte = true;
-						} else
-							teMailContacte = false;
-					} catch (Throwable th) {
-						teMailContacte = false;
-					}
-					if (!teMailContacte) {
-						// Si no té shortname ni mail de contacte,
-						// esborrem l'attribut (si existeix)
-						LDAPAttribute atributo = Entry.getAttribute("mail");
-						if (atributo != null) {
-							modList.add(new LDAPModification(
-									LDAPModification.DELETE, new LDAPAttribute("mail")));
-						}
-					}
-				}
-				LDAPModification[] mods = new LDAPModification[modList
-						.size()];
-				mods = new LDAPModification[modList.size()];
-				mods = (LDAPModification[]) modList.toArray(mods);
-				getConnection().modify(dn, mods);
-			}
-		} catch (Exception e) {
-			String msg = "UpdateUserAlias ('" + account
-					+ "') Error en la propagación alias a LDAP del usuario. ";
-			if (usuari!=null) msg+= " Shortname='" + usuari.getNomCurt() + "' domain='"
-					+ usuari.getDominiCorreu() + ". ";
-			msg += "["+ e.getMessage() +"]";
-			log.warn(msg, e);
-			throw new InternalErrorException(msg,e);
-		} 
 	}
 
-	/**
-	 * Actualiza los alias de un usuario en el directorio LDAP.
-	 * 
-	 * @param alias
-	 *            alias del usuario
-	 * @param domain
-	 *            Dominio de correo
-	 * @see LDAPAgent#UpdateUserAlias
-	 */
-
-	public void updateListAlias(LlistaCorreu list)
-			throws InternalErrorException {
-		ArrayList modList = new ArrayList();
-		LDAPModification[] mods = null;
-		try {
-			String mail = textify(list.getNom(), list.getCodiDomini());
-			// Remove previous assignments
-			LDAPEntry entry = new LDAPEntry();
-			String searchBase = usersContext;
-			String searchFilter = "mail=" + mail;
-			int searchScope = LDAPConnection.SCOPE_ONE;
-			LDAPSearchResults searchResults = getConnection().search(searchBase,
-					searchScope, searchFilter, null, // return all attributes
-					false); // return attrs and values
-			while (searchResults.hasMore()) {
-				entry = searchResults.next();
-				modList.clear();
-				LDAPAttribute attrib = new LDAPAttribute("mail", mail);
-				modList.add(new LDAPModification(LDAPModification.DELETE,
-						attrib));
-				mods = new LDAPModification[modList.size()];
-				mods = (LDAPModification[]) modList.toArray(mods);
-				getConnection().modify(entry.getDN(), mods);
-			}
-			if (list != null)
-			{
-				String[] users = list.getLlistaUsuaris().split(", ");
-				String[] externs = list.getLlistaExterns().split(", ");
-				String[] llistes = list.getLlistaExterns().split(", ");	
-				if (users.length == 1 && externs.length == 0 && llistes.length == 0) {
-					searchResults = getConnection().search(searchBase,
-							searchScope, "uid="+users[0], null, // return all attributes
-							false); // return attrs and values
-					while (searchResults.hasMore()) {
-						entry = searchResults.next();
-						LDAPAttribute attribute = new LDAPAttribute("mail",
-								mail);
-						modList.clear();
-						
-						modList.add(new LDAPModification(LDAPModification.ADD,
-								attribute));
-						mods = new LDAPModification[modList.size()];
-						mods = (LDAPModification[]) modList.toArray(mods);
-						getConnection().modify(entry.getDN(), mods);
-					}
-				}
-			}
-		} catch (Exception e) {
-			String msg = "UpdateListAlias (" + list.toString() + ") "
-					+ " Error en alias "
-					+ list.getNom()+"@"+list.getCodiDomini()+ ". "
-					+ "[" + e.toString() + "]";
-			log.warn(msg,e);
-			throw new InternalErrorException(msg,e);
-		} 
-	}
-
-	/**
-	 * Busca los datos de un usuario en el directorio LDAP a partir del mail
-	 * 
-	 * @param mail
-	 *            mail del usuario
-	 * @return LDAPEntry entrada del directorio LDAP
-	 * @throws InternalErrorException
-	 *             Error al buscar el usuario por su mail
-	 */
-
-	private LDAPEntry buscarLDAPMail(String mail) throws InternalErrorException {
-		try {
-			LDAPEntry Entry = new LDAPEntry();
-			String searchBase = usersContext;
-			String searchFilter = "mail=" + mail;
-			int searchScope = LDAPConnection.SCOPE_ONE;
-			LDAPSearchResults searchResults = getConnection().search(searchBase,
-					searchScope, searchFilter, null, // return all attributes
-					false); // return attrs and values
-			if (searchResults.hasMore()) {
-				Entry = searchResults.next();
-			} else {
-				Entry = null;
-			}
-			return (Entry);
-		} catch (LDAPException e) {
-			if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT) {
-				return null;
-			} else {
-				String msg = "buscarLDAPMail(" + mail
-						+ ") Error al buscar por mail, resultcode=["
-						+ e.getResultCode() + "]. ["+ e.getMessage()+"]";
-				log.warn(msg,e);
-				throw new InternalErrorException(msg,e);
-			}
-		} 
-	}
 
 	/** digest SHA-1 necesario para encriptar las contraseñas */
 	{
@@ -1014,57 +858,6 @@ public class LDAPAgent extends Agent implements MailAliasMgr, UserMgr, RoleMgr, 
 			es.caib.seycon.ng.comu.Password arg1) throws RemoteException,
 			es.caib.seycon.ng.exception.InternalErrorException {
 		return false;
-	}
-
-	/* (non-Javadoc)
-	 * @see es.caib.seycon.ng.sync.intf.MailAliasMgr#removeListAlias(java.lang.String, java.lang.String)
-	 */
-	public void removeListAlias(String list, String domain)
-			throws es.caib.seycon.ng.exception.InternalErrorException {
-		String mail = textify(list, domain);
-		// Remove previous assignments
-		LDAPEntry entry = new LDAPEntry();
-		String searchBase = usersContext;
-		String searchFilter = "mail=" + mail;
-		int searchScope = LDAPConnection.SCOPE_ONE;
-		try {
-			LDAPSearchResults searchResults = getConnection().search(searchBase,
-					searchScope, searchFilter, null, // return all attributes
-					false); // return attrs and values
-			while (searchResults.hasMore()) {
-				entry = searchResults.next();
-				LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
-				LDAPAttribute attrib = new LDAPAttribute("mail", mail);
-				modList.add(new LDAPModification(LDAPModification.DELETE,
-						attrib));
-				getConnection().modify(entry.getDN(), modList.toArray(new LDAPModification[modList.size()]));
-			}
-		} catch (LDAPException e) {
-			throw new InternalErrorException("Error removing list alias "+list+"@"+domain, e);
-		}
-	}
-
-	/* (non-Javadoc)
-	 * @see es.caib.seycon.ng.sync.intf.MailAliasMgr#removeUserAlias(java.lang.String)
-	 */
-	public void removeUserAlias(String account)
-			throws es.caib.seycon.ng.exception.InternalErrorException {
-		try {
-			LDAPEntry Entry = buscarUsuario(account);
-			@SuppressWarnings("rawtypes")
-			ArrayList modList = new ArrayList();
-			if (Entry != null) {
-				String dn = Entry.getDN();
-				LDAPAttribute atributo = Entry.getAttribute("mail");
-				if (atributo != null) {
-					getConnection().modify(dn, new LDAPModification[] {
-						new LDAPModification(
-							LDAPModification.DELETE, new LDAPAttribute("mail"))});
-				}
-			}
-		} catch (Exception e) {
-			throw new InternalErrorException("Error removing mail alias for acount "+account,e);
-		} 
 	}
 
 }

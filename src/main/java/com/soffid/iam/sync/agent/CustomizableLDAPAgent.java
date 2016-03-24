@@ -8,17 +8,10 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Vector;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import javax.ejb.RemoveException;
 
 import com.novell.ldap.LDAPAttribute;
 import com.novell.ldap.LDAPAttributeSet;
@@ -37,14 +30,10 @@ import com.soffid.iam.api.Group;
 import es.caib.seycon.ng.comu.Account;
 import es.caib.seycon.ng.comu.AttributeDirection;
 import es.caib.seycon.ng.comu.AttributeMapping;
-import es.caib.seycon.ng.comu.DadaUsuari;
-import es.caib.seycon.ng.comu.Dispatcher;
 import es.caib.seycon.ng.comu.Grup;
-import es.caib.seycon.ng.comu.LlistaCorreu;
 import es.caib.seycon.ng.comu.ObjectMapping;
 import es.caib.seycon.ng.comu.Password;
 import es.caib.seycon.ng.comu.Rol;
-import es.caib.seycon.ng.comu.RolGrant;
 import es.caib.seycon.ng.comu.SoffidObjectType;
 import es.caib.seycon.ng.comu.Usuari;
 import es.caib.seycon.ng.exception.InternalErrorException;
@@ -140,10 +129,10 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	
 	@Override
 	public void init() throws InternalErrorException {
-		log.info("Starting LDAPAgente agent on {}", getDispatcher().getCodi(),
-				null);
 		loginDN = getDispatcher().getParam0();
 		password = Password.decode(getDispatcher().getParam1());
+		log.info("Starting LDAPAgente agent on {}: {}", getDispatcher().getCodi(),
+				loginDN);
 		// password = params[1];
 		ldapHost = getDispatcher().getParam2();
 		passwordAttribute = getDispatcher().getParam3();
@@ -468,7 +457,8 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				try {
 					if (dn != null) {
 						log.info("Updating object {}", dn, null);
-						conn.delete(dn);
+						if (buscarUsuario(dn) != null)
+							conn.delete(dn);
 					}
 				} catch (Exception e) {
 					String msg = "updating object : " + dn;
@@ -570,7 +560,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 						buf.append ("(")
 							.append (attribute)
 							.append ("=")
-							.append (value)
+							.append (escapeLDAPSearchFilter(value))
 							.append(")");
 					}
 					if (values.length > 1)
@@ -1397,6 +1387,76 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				}
 			}
 		}
+	}
+	
+	public static String escapeDN(String name) {
+		StringBuffer sb = new StringBuffer(); // If using JDK >= 1.5 consider
+												// using StringBuilder
+		if ((name.length() > 0)
+				&& ((name.charAt(0) == ' ') || (name.charAt(0) == '#'))) {
+			sb.append('\\'); // add the leading backslash if needed
+		}
+		for (int i = 0; i < name.length(); i++) {
+			char curChar = name.charAt(i);
+			switch (curChar) {
+			case '\\':
+				sb.append("\\\\");
+				break;
+			case ',':
+				sb.append("\\,");
+				break;
+			case '+':
+				sb.append("\\+");
+				break;
+			case '"':
+				sb.append("\\\"");
+				break;
+			case '<':
+				sb.append("\\<");
+				break;
+			case '>':
+				sb.append("\\>");
+				break;
+			case ';':
+				sb.append("\\;");
+				break;
+			default:
+				sb.append(curChar);
+			}
+		}
+		if ((name.length() > 1) && (name.charAt(name.length() - 1) == ' ')) {
+			sb.insert(sb.length() - 1, '\\'); // add the trailing backslash if
+												// needed
+		}
+		return sb.toString();
+	}
+
+	public static final String escapeLDAPSearchFilter(String filter) {
+		StringBuffer sb = new StringBuffer(); // If using JDK >= 1.5 consider
+												// using StringBuilder
+		for (int i = 0; i < filter.length(); i++) {
+			char curChar = filter.charAt(i);
+			switch (curChar) {
+			case '\\':
+				sb.append("\\5c");
+				break;
+			case '*':
+				sb.append("\\2a");
+				break;
+			case '(':
+				sb.append("\\28");
+				break;
+			case ')':
+				sb.append("\\29");
+				break;
+			case '\u0000':
+				sb.append("\\00");
+				break;
+			default:
+				sb.append(curChar);
+			}
+		}
+		return sb.toString();
 	}
 }
 	
