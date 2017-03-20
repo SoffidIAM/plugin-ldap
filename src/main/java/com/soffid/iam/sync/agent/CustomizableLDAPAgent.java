@@ -21,6 +21,7 @@ import com.novell.ldap.LDAPEntry;
 import com.novell.ldap.LDAPException;
 import com.novell.ldap.LDAPJSSESecureSocketFactory;
 import com.novell.ldap.LDAPModification;
+import com.novell.ldap.LDAPReferralException;
 import com.novell.ldap.LDAPSearchConstraints;
 import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
@@ -360,6 +361,11 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 							}
 							if (debugEnabled)
 								log.info("================================================");
+							int i = dn.indexOf(",");
+							if (i > 0) {
+								String parentName = dn.substring(i + 1);
+								createParents(parentName);
+							}
 							entry = new LDAPEntry(dn, attributeSet);
 							conn.add(entry);
 							if (accountName != null) {
@@ -372,7 +378,6 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 											accountName, getCodi());
 									updatePassword(accountName, objects, p, true);
 								}
-	
 							}
 						} else {
 							LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
@@ -425,6 +430,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 									}
 								}
 							}
+							
 							if (modList.size() > 0)
 							{
 								LDAPModification[] mods = new LDAPModification[modList
@@ -433,6 +439,28 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 								mods = (LDAPModification[]) modList.toArray(mods);
 								debugModifications("Modifying", dn, mods);
 								conn.modify(dn, mods);
+							}
+
+							if (!entry.getDN().equalsIgnoreCase(dn)) {
+								// Check if must rename
+								boolean rename = true;
+								ExtensibleObjectMapping mapping = getMapping(obj
+										.getObjectType());
+								if (mapping != null) {
+									rename = !"false".equalsIgnoreCase(mapping
+											.getProperties().get("rename"));
+								}
+								if (rename) {
+									int i = dn.indexOf(",");
+									if (i > 0) {
+										String parentName = dn.substring(i + 1);
+										createParents(parentName);
+
+										entry = conn.read(entry.getDN());
+										conn.rename(entry.getDN(), dn.substring(0, i),
+												parentName, true);
+									}
+								}
 							}
 						}
 					}
@@ -683,6 +711,51 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	}
 
 	
+	private void createParents(String dn) throws Exception {
+		if (dn.equals(baseDN))
+			return;
+
+		boolean found = false;
+		try {
+			pool.getConnection().read(dn);
+			found = true;
+		} catch (LDAPReferralException e) {
+		} catch (LDAPException e) {
+			if (e.getResultCode() != LDAPException.NO_SUCH_OBJECT) {
+				throw e;
+			}
+		} finally {
+			pool.returnConnection();
+		}
+
+		if (!found) {
+			int i = dn.indexOf(",");
+			if (i > 0) {
+				String parentName = dn.substring(i + 1);
+				createParents(parentName);
+				LDAPAttributeSet attributeSet = new LDAPAttributeSet();
+				int j = dn.substring(i).indexOf("=");
+				String name = dn.substring(j, i);
+				if (dn.toLowerCase().startsWith("ou=")) {
+					attributeSet.add(new LDAPAttribute("objectclass",
+							"organizationalUnit"));
+					attributeSet.add(new LDAPAttribute("ou", name));
+				} else {
+					throw new InternalErrorException("Unable to create object "
+							+ dn);
+				}
+				LDAPEntry entry = new LDAPEntry(dn, attributeSet);
+				try {
+					log.info("Creating " + dn);
+					pool.getConnection().add(entry);
+				} finally {
+					pool.returnConnection();
+				}
+			}
+		}
+	}
+
+
 	LinkedList<ExtensibleObject> getLdapObjects (SoffidObjectType type, String first, int count) throws LDAPException, InternalErrorException
 	{
 		
