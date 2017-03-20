@@ -28,6 +28,7 @@ import com.novell.ldap.LDAPEntry;
 import com.novell.ldap.LDAPException;
 import com.novell.ldap.LDAPJSSESecureSocketFactory;
 import com.novell.ldap.LDAPModification;
+import com.novell.ldap.LDAPReferralException;
 import com.novell.ldap.LDAPSearchConstraints;
 import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
@@ -179,7 +180,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				boolean repeat = false;
 				do {
 					try {
-						ldapUser = buscarUsuario(dn); // ui puede ser nulo
+						ldapUser = buscarUsuario(object); // ui puede ser nulo
 
 						if (ldapUser == null) {
 							// Generem un error perquè potser que l'usuari
@@ -187,7 +188,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 							// no esté donat d'alta al ldap [usuaris alumnes]:
 							// u88683 27/01/2011
 							updateObjects(accountName, objects);
-							ldapUser = buscarUsuario(dn);
+							ldapUser = buscarUsuario(object);
 						}
 
 						ArrayList modList = new ArrayList();
@@ -277,6 +278,33 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 		}
 	}
 
+	public static final String escapeLDAPSearchFilter(String filter) {
+		StringBuffer sb = new StringBuffer(); // If using JDK >= 1.5 consider
+												// using StringBuilder
+		for (int i = 0; i < filter.length(); i++) {
+			char curChar = filter.charAt(i);
+			switch (curChar) {
+			case '\\':
+				sb.append("\\5c");
+				break;
+			case '*':
+				sb.append("\\2a");
+				break;
+			case '(':
+				sb.append("\\28");
+				break;
+			case ')':
+				sb.append("\\29");
+				break;
+			case '\u0000':
+				sb.append("\\00");
+				break;
+			default:
+				sb.append(curChar);
+			}
+		}
+		return sb.toString();
+	}
 	/**
 	 * Busca los datos de un usuario en el directorio LDAP
 	 * 
@@ -286,9 +314,38 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 	 * @throws InternalErrorException
 	 *             Error al buscar el usuario
 	 */
-	private LDAPEntry buscarUsuario(String dn) throws InternalErrorException {
+	private LDAPEntry buscarUsuario(ExtensibleObject object) throws InternalErrorException {
+		String dn = vom.toString(object.getAttribute("dn"));
 		try {
-			return getConnection().read(dn);
+			ExtensibleObjectMapping mapping = getMapping(object.getObjectType());
+			String keyObject = mapping.getProperties().get("key");
+			String keyValue = keyObject == null ? null :
+				vom.toString(object.getAttribute(keyObject));
+			String base = mapping.getProperties().get("baseDn");
+
+			if (keyObject == null)
+				return getConnection().read(dn);
+			else
+			{
+				String objectClass = vom.toSingleString(object
+						.getAttribute("objectClass"));
+				String queryString = "(&(objectClass=" + objectClass
+						+ ")("+keyObject+"=" + escapeLDAPSearchFilter(keyValue.toString())
+						+ "))";
+				log.info("Looking for objects: LDAP QUERY="
+							+ queryString.toString() + " on " + base);
+				LDAPSearchResults query = getConnection().search(base,
+						LDAPConnection.SCOPE_SUB, queryString, null, false);
+				while (query.hasMore()) {
+					try {
+						LDAPEntry entry = query.next();
+						return entry;
+					} catch (LDAPReferralException e) {
+					}
+				}
+
+				return null;
+			}
 		} catch (LDAPException e) {
 			if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
 				return null;
@@ -335,6 +392,15 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			return new String[] { vom.toString(obj) };
 		}
 	}
+
+	private ExtensibleObjectMapping getMapping(String objectType) {
+		for (ExtensibleObjectMapping map : objectMappings) {
+			if (map.getSystemObject().equals(objectType))
+				return map;
+		}
+		return null;
+	}
+
 	/**
 	 * Añade los datos de un usuario al directorio LDAP
 	 * @param accountName 
@@ -352,7 +418,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			try {
 				if (dn != null) {
 					log.info("Updating object {}", dn, null);
-					LDAPEntry entry = buscarUsuario(dn);
+					LDAPEntry entry = buscarUsuario(object);
 					if (entry == null) {
 						LDAPAttributeSet attributeSet = new LDAPAttributeSet();
 						for (String attribute : object.getAttributes()) {
@@ -405,6 +471,26 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 						mods = new LDAPModification[modList.size()];
 						mods = (LDAPModification[]) modList.toArray(mods);
 						getConnection().modify(dn, mods);
+						
+						if (!entry.getDN().equalsIgnoreCase(dn)) {
+							// Check if must rename
+							boolean rename = true;
+							ExtensibleObjectMapping mapping = getMapping(object
+									.getObjectType());
+							if (mapping != null) {
+								rename = !"false".equalsIgnoreCase(mapping
+										.getProperties().get("rename"));
+							}
+							if (rename) {
+								int i = dn.indexOf(",");
+								if (i > 0) {
+									String parentName = dn.substring(i + 1);
+
+									getConnection().rename(entry.getDN(), dn.substring(0, i),
+											parentName, true);
+								}
+							}
+						}
 					}
 				}
 			} catch (Exception e) {
@@ -821,15 +907,11 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 				// Generate system objects from source user
 				ExtensibleObject systemObject = objectTranslator.generateObject(example, objectMapping, true);
 				
-				String dn = vom.toString(systemObject.getAttribute("dn"));
-				if (dn != null)
+				// Search object by dn
+				LDAPEntry entry = buscarUsuario(systemObject);
+				if (entry != null)
 				{
-					// Search object by dn
-					LDAPEntry entry = buscarUsuario(dn);
-					if (entry != null)
-					{
-						return parseEntry (entry, objectMapping);
-					}
+					return parseEntry (entry, objectMapping);
 				}
 			}
 		}
@@ -900,7 +982,7 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 			String dn = vom.toString(systemObject.getAttribute("dn"));
 			if (dn != null)
 			{
-				LDAPEntry entry = buscarUsuario(dn);
+				LDAPEntry entry = buscarUsuario(systemObject);
 				if (entry != null)
 				{
 					for (ExtensibleObjectMapping objectMapping: objectMappings)
@@ -1070,20 +1152,28 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	public void removeUser(String userName) throws RemoteException,
 			InternalErrorException {
-		Account account = new Account();
-		account.setName(userName);
-		account.setDescription(userName);
-		account.setDisabled(false);
-		account.setDispatcher(getDispatcher().getCodi());
+		Account account = getServer().getAccountInfo(userName, getCodi());
 		ExtensibleObjects objects;
-
-		try {
-			Usuari user = getServer().getUserInfo(userName, getDispatcher().getCodi());
-			objects = objectTranslator.generateObjects(new UserExtensibleObject(account, user, getServer()));
-		} catch (UnknownUserException e) {
+		if (account == null)
+		{
+			account = new Account();
+			account.setName(userName);
+			account.setDescription(userName);
+			account.setDisabled(true);
+			account.setDispatcher(getDispatcher().getCodi());
 			objects = objectTranslator.generateObjects(new AccountExtensibleObject(account, getServer()));
+			removeObjects(objects);
 		}
-		removeObjects(objects);
+		else
+		{
+			try {
+				Usuari user = getServer().getUserInfo(userName, getDispatcher().getCodi());
+				objects = objectTranslator.generateObjects(new UserExtensibleObject(account, user, getServer()));
+			} catch (UnknownUserException e) {
+				objects = objectTranslator.generateObjects(new AccountExtensibleObject(account, getServer()));
+			}
+			updateObjects(userName, objects);
+		}
 	}
 
 	public void updateUserPassword(String userName, Usuari userData,
@@ -1149,6 +1239,8 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 
 	public void updateRole(Rol rol) throws RemoteException,
 			InternalErrorException {
+		if (!getCodi().equals(rol.getBaseDeDades()))
+			return;
 		ExtensibleObjects objects = objectTranslator.generateObjects(new RoleExtensibleObject(rol, getServer()));
 		updateObjects(null, objects);
 	}
@@ -1224,10 +1316,10 @@ public class CustomizableLDAPAgent extends Agent implements ExtensibleObjectMgr,
 						Object attributes = object.getAttribute("attributes");
 						if (attributes instanceof Map)
 						{
-							Map<String,String> attributesMap = new HashMap<String, String>();
+							Map<String,Object> attributesMap = new HashMap<String, Object>();
 							for (Object attributeName: ((Map)attributes).keySet())
 							{
-								attributesMap.put((String)attributeName, (String) vom.toSingleString(((Map)attributes).get(attributeName)));
+								attributesMap.put((String)attributeName, vom.toSingleton(((Map)attributes).get(attributeName)));
 							}
 							change.setAttributes(attributesMap);
 						}
