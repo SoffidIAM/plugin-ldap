@@ -227,7 +227,7 @@ public class CustomizableLDAPAgent extends Agent implements
 									.size()];
 							mods = new LDAPModification[modList.size()];
 							mods = (LDAPModification[]) modList.toArray(mods);
-							debugModifications("Modifying password ", dn, mods);
+							debugModifications("Modifying password ", ldapUser.getDN(), mods);
 							try {
 								pool.getConnection().modify(dn, mods);
 							} finally {
@@ -304,7 +304,6 @@ public class CustomizableLDAPAgent extends Agent implements
 			String keyObject = mapping.getProperties().get("key");
 			String keyValue = keyObject == null ? null : vom.toString(object
 					.getAttribute(keyObject));
-			String base = mapping.getProperties().get("baseDn");
 
 			if (keyObject == null)
 				return conn.read(dn);
@@ -315,8 +314,8 @@ public class CustomizableLDAPAgent extends Agent implements
 						+ keyObject + "="
 						+ escapeLDAPSearchFilter(keyValue.toString()) + "))";
 				log.info("Looking for objects: LDAP QUERY="
-						+ queryString.toString() + " on " + base);
-				LDAPSearchResults query = conn.search(base,
+						+ queryString.toString() + " on " + baseDN);
+				LDAPSearchResults query = conn.search(baseDN,
 						LDAPConnection.SCOPE_SUB, queryString, null, false);
 				while (query.hasMore()) {
 					try {
@@ -509,7 +508,7 @@ public class CustomizableLDAPAgent extends Agent implements
 								mods = (LDAPModification[]) modList
 										.toArray(mods);
 								debugModifications("Modifying", dn, mods);
-								conn.modify(dn, mods);
+								conn.modify(entry.getDN(), mods);
 							}
 							if (!entry.getDN().equalsIgnoreCase(dn)) {
 								// Check if must rename
