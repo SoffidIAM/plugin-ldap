@@ -1145,8 +1145,8 @@ public class CustomizableLDAPAgent extends Agent implements
 			userMap.put("system", getDispatcher().getCodi());
 			List<Map<String, Object>> userMapList = new LinkedList<Map<String, Object>>();
 			userMapList.add(userMap);
-			rolObject.setAttribute("allGrantedAccounts", userMap);
-			rolObject.setAttribute("grantedAccounts", userMap);
+			rolObject.setAttribute("allGrantedAccounts", userMapList);
+			rolObject.setAttribute("grantedAccounts", userMapList);
 			List<String> accountNames = new LinkedList<String>();
 			accountNames.add(userAccount);
 			rolObject.setAttribute("allGrantedAccountNames", accountNames);
