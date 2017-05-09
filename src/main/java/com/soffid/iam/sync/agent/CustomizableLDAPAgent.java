@@ -308,10 +308,20 @@ public class CustomizableLDAPAgent extends Agent implements
 			if (keyObject == null)
 				return conn.read(dn);
 			else {
-				String objectClass = vom.toSingleString(object
-						.getAttribute("objectClass"));
-				String queryString = "(&(objectClass=" + objectClass + ")("
-						+ keyObject + "="
+				Object oc = object.getAttribute("objectClass");
+				String queryString = "(&";
+				if (oc instanceof String[])
+				{
+					for (String objectClass: (String[])oc)
+					{
+						queryString = queryString + "(objectClass=" + objectClass + ")";						
+					}
+				} else {
+					queryString = queryString + "(objectClass=" + vom.toSingleString(oc) + ")";
+
+				}
+				queryString = queryString +
+						"("+ keyObject + "="
 						+ escapeLDAPSearchFilter(keyValue.toString()) + "))";
 				log.info("Looking for objects: LDAP QUERY="
 						+ queryString.toString() + " on " + baseDN);
