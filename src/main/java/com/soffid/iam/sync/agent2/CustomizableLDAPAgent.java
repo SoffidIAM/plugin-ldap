@@ -1,17 +1,22 @@
 package com.soffid.iam.sync.agent2;
 
+import java.io.IOException;
 import java.rmi.RemoteException;
 
 import com.novell.ldap.LDAPEntry;
+import com.soffid.iam.api.CustomObject;
 import com.soffid.iam.api.SoffidObjectType;
 import com.soffid.iam.sync.agent.CustomizableLDAPAgent2;
+import com.soffid.iam.sync.intf.CustomObjectMgr;
 
 import es.caib.seycon.ng.exception.InternalErrorException;
 import es.caib.seycon.ng.sync.intf.ExtensibleObject;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMapping;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjects;
 
-public class CustomizableLDAPAgent extends CustomizableLDAPAgent2 {
+public class CustomizableLDAPAgent extends CustomizableLDAPAgent2 
+	implements CustomObjectMgr
+{
 
 	public CustomizableLDAPAgent() throws RemoteException {
 	}
@@ -61,4 +66,23 @@ public class CustomizableLDAPAgent extends CustomizableLDAPAgent2 {
 		}
 	}
 
+	public void updateCustomObject(CustomObject obj) throws RemoteException, InternalErrorException {
+		ExtensibleObject soffidObject = new es.caib.seycon.ng.sync.engine.extobj.CustomExtensibleObject(obj, getServer());
+		ExtensibleObjects objects = objectTranslator.generateObjects(soffidObject);
+		try {
+			updateObjects(obj.getName(), objects, soffidObject);
+		} catch (Exception e) {
+			throw new InternalErrorException("Error updating LDAP object", e);
+		}
+	}
+
+	public void removeCustomObject(CustomObject obj) throws RemoteException, InternalErrorException {
+		ExtensibleObject soffidObject = new es.caib.seycon.ng.sync.engine.extobj.CustomExtensibleObject(obj, getServer());
+		ExtensibleObjects objects = objectTranslator.generateObjects(soffidObject);
+		try {
+			removeObjects(objects, soffidObject);
+		} catch (Exception e) {
+			throw new InternalErrorException("Error updating LDAP object", e);
+		}
+	}
 }
