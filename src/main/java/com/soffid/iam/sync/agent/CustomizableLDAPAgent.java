@@ -36,6 +36,7 @@ import es.caib.seycon.ng.comu.Grup;
 import es.caib.seycon.ng.comu.ObjectMapping;
 import es.caib.seycon.ng.comu.Password;
 import es.caib.seycon.ng.comu.Rol;
+import es.caib.seycon.ng.comu.RolGrant;
 import es.caib.seycon.ng.comu.SoffidObjectType;
 import es.caib.seycon.ng.comu.Usuari;
 import es.caib.seycon.ng.exception.InternalErrorException;
@@ -54,6 +55,7 @@ import es.caib.seycon.ng.sync.intf.ExtensibleObjectMapping;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMgr;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjects;
 import es.caib.seycon.ng.sync.intf.ReconcileMgr;
+import es.caib.seycon.ng.sync.intf.ReconcileMgr2;
 import es.caib.seycon.ng.sync.intf.RoleMgr;
 import es.caib.seycon.ng.sync.intf.UserMgr;
 import es.caib.seycon.util.Base64;
@@ -68,7 +70,7 @@ import es.caib.seycon.util.Base64;
  */
 
 public class CustomizableLDAPAgent extends Agent implements
-		ExtensibleObjectMgr, UserMgr, ReconcileMgr, RoleMgr,
+		ExtensibleObjectMgr, UserMgr, ReconcileMgr2, RoleMgr,
 		AuthoritativeIdentitySource2 {
 
 	ValueObjectMapper vom = new ValueObjectMapper();
@@ -1347,8 +1349,7 @@ public class CustomizableLDAPAgent extends Agent implements
 				try {
 					String dn = vom.toSingleString(entry.getAttribute("dn"));
 					if (dn != null) {
-						conn = new LDAPConnection(
-								new LDAPJSSESecureSocketFactory());
+						conn = new LDAPConnection();
 						conn.connect(ldapHost, ldapPort);
 						conn.bind(ldapVersion, dn, password.getPassword()
 								.getBytes("UTF8"));
@@ -1633,5 +1634,48 @@ public class CustomizableLDAPAgent extends Agent implements
 	public ExtensibleObject getSoffidObject(SoffidObjectType type, String object1, String object2)
 			throws RemoteException, InternalErrorException {
 		return null;
+	}
+
+	public Account getAccountInfo(String userAccount) throws RemoteException, InternalErrorException {
+		try {
+			ExtensibleObject eo = findExtensibleUser(userAccount);
+			if (eo == null)
+				return null;
+			ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
+			for (ExtensibleObject peo : parsed.getObjects()) {
+				Account usuari = vom.parseAccount(peo);
+				if (usuari != null)
+					return usuari;
+			}
+			return null;
+		} catch (InternalErrorException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new InternalErrorException("Unexpected exception", e);
+		}
+
+	}
+
+	public List<RolGrant> getAccountGrants(String userAccount) throws RemoteException, InternalErrorException {
+		List<RolGrant> grants = new LinkedList<RolGrant>();
+		LinkedList<Rol> roles;
+		try {
+			roles = new LinkedList<Rol>();
+			if (!populateRolesFromUser(userAccount, roles))
+				populateRolesFromRol(userAccount, roles);
+			for (Rol role : roles)
+			{
+				RolGrant rg = new RolGrant();
+				rg.setRolName(role.getNom());
+				rg.setDispatcher(getCodi());
+				rg.setInformationSystem(role.getCodiAplicacio());
+				rg.setOwnerAccountName(userAccount);
+				rg.setOwnerDispatcher(getCodi());
+				grants.add(rg);
+			}
+		} catch (Exception e) {
+			throw new InternalErrorException("Error accessing LDAP", e);
+		}
+		return grants;
 	}
 }
