@@ -310,7 +310,11 @@ public class CustomizableLDAPAgent extends Agent implements
 					.getAttribute(keyObject));
 
 			if (keyObject == null)
+			{
+				if (debugEnabled)
+					log.info("No key property defined. Searching dn "+dn);
 				return conn.read(dn);
+			}
 			else {
 				Object oc = object.getAttribute("objectClass");
 				String queryString = "(&";
@@ -408,7 +412,6 @@ public class CustomizableLDAPAgent extends Agent implements
 	 */
 	public void updateObjects(String accountName, ExtensibleObjects objects, ExtensibleObject soffidObject)
 			throws Exception {
-
 		LDAPConnection conn = pool.getConnection();
 		try {
 			for (ExtensibleObject obj : objects.getObjects()) {
@@ -420,7 +423,7 @@ public class CustomizableLDAPAgent extends Agent implements
 						if (entry == null) {
 							if (debugEnabled) {
 								log.info("================================================");
-								log.info("Creating object " + dn);
+								debugObject("Creating object", obj, "  ");
 							}
 							if (preInsert(soffidObject, obj))
 							{
@@ -462,6 +465,10 @@ public class CustomizableLDAPAgent extends Agent implements
 								postInsert(soffidObject, obj, entry);
 							}
 						} else {
+							if (debugEnabled) {
+								log.info("================================================");
+								debugObject("Updating object "+entry.getDN(), obj, "  ");
+							}
 							if (preUpdate(soffidObject, obj, entry))
 							{
 								LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
@@ -540,6 +547,8 @@ public class CustomizableLDAPAgent extends Agent implements
 												.getProperties().get("rename"));
 									}
 									if (rename) {
+										if (debugEnabled)
+											log.info("Renaminf from "+entry.getDN()+" to "+dn);
 										int i = dn.indexOf(",");
 										if (i > 0) {
 											String parentName = dn.substring(i + 1);
@@ -574,19 +583,20 @@ public class CustomizableLDAPAgent extends Agent implements
 				String dn = vom.toString(object.getAttribute("dn"));
 				try {
 					if (dn != null) {
-						log.info("Updating object {}", dn, null);
 						LDAPEntry entry = buscarUsuario(object);
 						if ( entry != null)
 						{
+							if (debugEnabled)
+								debugEntry("Object to remove", entry.getDN(), entry.getAttributeSet());
 							if (preDelete(soffidObject, entry))
 							{
-								conn.delete(dn);
+								conn.delete(entry.getDN());
 								postDelete(soffidObject, entry);
 							} 
 						}
 					}
 				} catch (Exception e) {
-					String msg = "updating object : " + dn;
+					String msg = "deleting object : " + dn;
 					log.warn(msg, e);
 					throw new InternalErrorException(msg, e);
 				}
@@ -672,14 +682,14 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	private boolean buildQuery(ExtensibleObject objectQuery, StringBuffer buf) {
 		boolean any = false;
+		int attributes = 0;
 		for (String attribute : objectQuery.getAttributes()) {
 			if (!attribute.equals("dn")) {
 				String[] values = toStringArray(objectQuery
 						.getAttribute(attribute));
 				if (values != null && values.length > 0) {
 					any = true;
-					if (buf.length() == 0)
-						buf.append("(&");
+					attributes ++;
 					if (values.length > 1)
 						buf.append("(|");
 					for (String value : values) {
@@ -693,9 +703,12 @@ public class CustomizableLDAPAgent extends Agent implements
 			}
 		}
 
-		if (buf.length() > 0)
+		if (attributes > 1)
+		{
+			buf.insert(0, "(&");
 			buf.append(")");
-
+		}
+		
 		if (debugEnabled)
 			log.info("Performing query " + buf.toString());
 		return any;
@@ -734,6 +747,8 @@ public class CustomizableLDAPAgent extends Agent implements
 					boolean any = buildQuery(dummySystemObject, sb);
 
 					if (any) {
+						if (debugEnabled)
+							log.info("Executing query "+sb.toString()+" on "+baseDN);
 						LDAPSearchConstraints oldConst = conn
 								.getSearchConstraints(); // Save search
 															// constraints
@@ -757,15 +772,15 @@ public class CustomizableLDAPAgent extends Agent implements
 							// Process results
 							while (searchResults.hasMore()) {
 								try {
-									System.out.println("Accounts : "
-											+ accounts.size() + " ");
 									LDAPEntry entry = searchResults.next();
+									debugEntry("Got object", entry.getDN(), entry.getAttributeSet());
 									ExtensibleObject eo = parseEntry(entry,
 											mapping);
 									ExtensibleObjects parsed = objectTranslator
 											.parseInputObjects(eo);
 									for (ExtensibleObject eo2 : parsed
 											.getObjects()) {
+										debugObject("Translated to", eo2, "  ");
 										Account account = vom.parseAccount(eo2);
 										if (account != null)
 											accounts.add(account.getName());
@@ -961,7 +976,6 @@ public class CustomizableLDAPAgent extends Agent implements
 
 		Set<String> accounts = new HashSet<String>();
 		try {
-			accounts.addAll(getSoffidAccounts(SoffidObjectType.OBJECT_USER));
 			accounts.addAll(getSoffidAccounts(SoffidObjectType.OBJECT_ACCOUNT));
 		} catch (Exception e) {
 			throw new InternalErrorException("Error getting accounts list", e);
@@ -1015,18 +1029,34 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	private ExtensibleObject findExtensibleUser(String userAccount)
 			throws Exception {
+		if (debugEnabled)
+			log.info("Searching for account "+userAccount);
+		Account acc = getServer().getAccountInfo(userAccount, getCodi());
+		Usuari user = null;
+		ExtensibleObject account;
 		// Generate a dummy object to perform query
-		ExtensibleObject account = new ExtensibleObject();
+		if (acc == null)
+		{
+			acc = new Account();
+			acc.setName(userAccount);
+			acc.setDispatcher(getCodi());
+			acc.setDisabled(false);
+		}
+		else
+		{
+			try {
+				user = getServer().getUserInfo(userAccount, getCodi());
+			} catch (UnknownUserException e) {
+				
+			}
+		}
+		account = user == null ? new UserExtensibleObject(acc, user, getServer()) :  new AccountExtensibleObject(acc, getServer());
 		account.setObjectType(SoffidObjectType.OBJECT_ACCOUNT.getValue());
-		account.setAttribute("accountName", userAccount);
 		ExtensibleObject found = findUserByExample(account);
 		if (found != null)
 			return found;
-		//
-		ExtensibleObject user = new ExtensibleObject();
-		user.setObjectType(SoffidObjectType.OBJECT_USER.getValue());
-		user.setAttribute("accountName", userAccount);
-		return findUserByExample(user);
+		account.setObjectType(SoffidObjectType.OBJECT_USER.getValue());
+		return findUserByExample(account);
 	}
 
 	private ExtensibleObject findUserByExample(ExtensibleObject example)
@@ -1187,7 +1217,6 @@ public class CustomizableLDAPAgent extends Agent implements
 			for (ExtensibleObject systemObject : systemObjects.getObjects()) {
 				StringBuffer sb = new StringBuffer();
 
-				sb.append("(&");
 				boolean any = buildQuery(systemObject, sb);
 				if (any && baseDN != null) {
 					LDAPSearchResults search = conn.search(baseDN,
@@ -1273,18 +1302,20 @@ public class CustomizableLDAPAgent extends Agent implements
 		Account account = getServer().getAccountInfo(userName, getCodi());
 		ExtensibleObjects objects;
 		try {
-			AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
-					getServer());
 			if (account == null) {
 				account = new Account();
 				account.setName(userName);
 				account.setDescription(userName);
 				account.setDisabled(true);
 				account.setDispatcher(getDispatcher().getCodi());
+				AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
+						getServer());
 				objects = objectTranslator
 						.generateObjects(sourceObject);
 				removeObjects(objects, sourceObject);
 			} else {
+				AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
+						getServer());
 				try {
 					Usuari user = getServer().getUserInfo(userName,
 							getDispatcher().getCodi());
