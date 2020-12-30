@@ -17,7 +17,7 @@ import es.caib.seycon.ng.sync.intf.ExtensibleObjects;
 public class CustomizableLDAPAgent extends CustomizableLDAPAgent2 
 	implements CustomObjectMgr
 {
-
+	
 	public CustomizableLDAPAgent() throws RemoteException {
 	}
 

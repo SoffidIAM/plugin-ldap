@@ -29,6 +29,17 @@
 			</hbox>
 		</row>
 		<row>
+			<input_etiqueta value="Enable SSL" />
+			<listbox bind="@param9" mold="select"  disabled="{!canModifyAgent}" width="100px">
+				<listitem value="false">
+					<listcell label="No"/>
+				</listitem>
+				<listitem value="true">
+					<listcell label="Yes"/>
+				</listitem>
+			</listbox>
+		</row>
+		<row>
 			<input_etiqueta value="Base DN" />
 			<hbox width="90%">
 				<input_dada bind="@param7" lectura="${!canModifyAgent}"
