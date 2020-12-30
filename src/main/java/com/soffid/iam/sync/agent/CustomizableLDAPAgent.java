@@ -72,7 +72,7 @@ import es.caib.seycon.util.Base64;
 public class CustomizableLDAPAgent extends Agent implements
 		ExtensibleObjectMgr, UserMgr, ReconcileMgr2, RoleMgr,
 		AuthoritativeIdentitySource2 {
-
+	boolean ssl;
 	ValueObjectMapper vom = new ValueObjectMapper();
 
 	protected ObjectTranslator objectTranslator = null;
@@ -150,8 +150,8 @@ public class CustomizableLDAPAgent extends Agent implements
 		passwordPrefix = getDispatcher().getParam5();
 		if (passwordPrefix == null)
 			hashType = "{" + hashType + "}";
-
 		baseDN = getDispatcher().getParam7();
+		ssl = "true".equals(getDispatcher().getParam9());
 
 		debugEnabled = "true".equals(getDispatcher().getParam8());
 
@@ -178,13 +178,13 @@ public class CustomizableLDAPAgent extends Agent implements
 			pool = new LDAPPool();
 			pools.put(getCodi(), pool);
 		}
+		pool.setSsl(ssl);
 		pool.setBaseDN(baseDN);
 		pool.setLdapHost(ldapHost);
 		pool.setLdapPort(ldapPort);
 		pool.setLdapVersion(ldapVersion);
 		pool.setLoginDN(loginDN);
 		pool.setPassword(password);
-		pool.setSsl(false);
 	}
 
 	/**
@@ -342,7 +342,7 @@ public class CustomizableLDAPAgent extends Agent implements
 					} catch (LDAPReferralException e) {
 					}
 				}
-
+				log.info("Not found");
 				return null;
 			}
 		} catch (LDAPException e) {
@@ -631,6 +631,7 @@ public class CustomizableLDAPAgent extends Agent implements
 		this.objectMappings = objects;
 		objectTranslator = new ObjectTranslator(getDispatcher(), getServer(),
 				objectMappings);
+		objectTranslator.setObjectFinder(new LDAPObjectFinder(this));
 
 	}
 
@@ -1083,6 +1084,8 @@ public class CustomizableLDAPAgent extends Agent implements
 			InternalErrorException {
 		Set<String> roles = new HashSet<String>();
 		try {
+			if (debugEnabled)
+				log.info("Getting roles list");
 			for (ExtensibleObject eo : getLdapObjects(
 					SoffidObjectType.OBJECT_ROLE, null, 0)) {
 				ExtensibleObjects parsed = objectTranslator
@@ -1103,6 +1106,8 @@ public class CustomizableLDAPAgent extends Agent implements
 	public Rol getRoleFullInfo(String roleName) throws RemoteException,
 			InternalErrorException {
 		try {
+			if (debugEnabled)
+				log.info("Getting role info for "+roleName);
 			ExtensibleObject rolObject = new ExtensibleObject();
 			rolObject.setObjectType(SoffidObjectType.OBJECT_ROLE.getValue());
 			rolObject.setAttribute("name", roleName);
@@ -1114,17 +1119,26 @@ public class CustomizableLDAPAgent extends Agent implements
 			for (ExtensibleObject systemObject : systemObjects.getObjects()) {
 				LDAPEntry entry = buscarUsuario(systemObject);
 				if (entry != null) {
+					if (debugEnabled)
+						debugEntry("Got object", entry.getDN(), entry.getAttributeSet());
 					for (ExtensibleObjectMapping objectMapping : objectMappings) {
-						if (objectMapping.getSoffidObject().equals(
-								rolObject.getObjectType())) {
+						if (objectMapping.getSoffidObject().toString().equals(
+								rolObject.getObjectType().toString())) {
 							ExtensibleObject eo = parseEntry(entry,
 									objectMapping);
+							if (debugEnabled)
+								debugObject("Translated to native object", eo, "");
 							ExtensibleObject parsed = objectTranslator
 									.parseInputObject(eo, objectMapping);
 							if (parsed != null) {
+								if (debugEnabled)
+									debugObject("Translated to Soffid object", parsed, "");
 								Rol rol = vom.parseRol(parsed);
-								if (rol != null)
+								if (rol != null) {
+									if (debugEnabled)
+										log.info(rol.toString());
 									return rol;
+								}
 							}
 						}
 					}
