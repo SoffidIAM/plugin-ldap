@@ -154,7 +154,7 @@ public class CustomizableLDAPAgent extends Agent implements
 		ssl = "true".equals(getDispatcher().getParam9());
 
 		debugEnabled = "true".equals(getDispatcher().getParam8());
-
+		log.info("Debug mode: "+debugEnabled);
 		try {
 			if (getDispatcher().getParam6() == null
 					|| getDispatcher().getParam6().trim().length() == 0)
@@ -1176,6 +1176,8 @@ public class CustomizableLDAPAgent extends Agent implements
 				List<Map<String, Object>> grantedRoles = (List<Map<String, Object>>) soffidObject
 						.get("grantedRoles");
 				if (grantedRoles != null) {
+					if (debugEnabled || isDebug())
+						log.info("Getting roles from user attribute 'grantedRoles'");
 					for (Map<String, Object> grantedRole : grantedRoles) {
 						Rol rol = new Rol();
 						rol.setBaseDeDades(getDispatcher().getCodi());
@@ -1189,6 +1191,8 @@ public class CustomizableLDAPAgent extends Agent implements
 				List<String> granted = (List<String>) soffidObject
 						.get("granted");
 				if (granted != null) {
+					if (debugEnabled || isDebug())
+						log.info("Getting roles from user attribute 'granted'");
 					for (String grantedRole : granted) {
 						Rol rol = new Rol();
 						rol.setBaseDeDades(getDispatcher().getCodi());
@@ -1225,42 +1229,69 @@ public class CustomizableLDAPAgent extends Agent implements
 			rolObject.setAttribute("allGrantedAccountNames", accountNames);
 			rolObject.setAttribute("grantedAccountNames", accountNames);
 
+			if (debugEnabled || isDebug())
+				debugObject("Searching grants from role object", rolObject, "");
 			// Generate a dummy object to perform query
-			ExtensibleObjects systemObjects = objectTranslator
-					.generateObjects(rolObject);
-			for (ExtensibleObject systemObject : systemObjects.getObjects()) {
-				StringBuffer sb = new StringBuffer();
-
-				boolean any = buildQuery(systemObject, sb);
-				if (any && baseDN != null) {
-					LDAPSearchResults search = conn.search(baseDN,
-							LDAPConnection.SCOPE_SUB, sb.toString(), null,
-							false);
-					while (search.hasMore()) {
-						try {
-							LDAPEntry roleEntry = search.next();
-							for (ExtensibleObjectMapping objectMapping : objectMappings) {
-								if (objectMapping.getSoffidObject().equals(
-										SoffidObjectType.OBJECT_ROLE)) {
+			for (ExtensibleObjectMapping objectMapping : objectMappings) {
+				if (objectMapping.getSoffidObject().equals(
+						SoffidObjectType.OBJECT_ROLE)) {
+					ExtensibleObject systemObject = objectTranslator.generateObject(rolObject, objectMapping);
+					StringBuffer sb = new StringBuffer();
+	
+					if (debugEnabled || isDebug())
+						debugObject("Searching grants from LDAP object", systemObject, "");
+					boolean any = buildQuery(systemObject, sb);
+					if (any && baseDN != null) {
+						String keyAttribute=objectMapping.getProperties().get("key");
+						String[] atts = keyAttribute == null ? null: new String[] {keyAttribute};
+						LDAPSearchResults search = conn.search(baseDN,
+								LDAPConnection.SCOPE_SUB, sb.toString(),
+								atts,
+								false);
+						if (debugEnabled || isDebug())
+							log.info("Executing query "+sb.toString());
+						while (search.hasMore()) {
+							try {
+								LDAPEntry roleEntry = search.next();
+								if (debugEnabled || isDebug())
+									debugEntry("Got ", roleEntry.getDN(), roleEntry.getAttributeSet());
+								
+								if ( keyAttribute == null) {
 									ExtensibleObject roleObject = parseEntry(
 											roleEntry, objectMapping);
 									ExtensibleObject soffidObject = objectTranslator
 											.parseInputObject(roleObject,
 													objectMapping);
 									Rol rol = vom.parseRol(soffidObject);
+									if (debugEnabled || isDebug())
+										log.info("Generated role "+rol);
 									if (rol != null) {
 										roles.add(rol);
 									}
+								} else {
+									ExtensibleObject roleObject = parseEntry(roleEntry, objectMapping);
+									String name = (String) objectTranslator.parseInputAttribute("name", roleObject, objectMapping);
+									if (debugEnabled || isDebug()) {
+										debugObject("Got ", roleObject, "");
+										log.info("Parsed name = "+name);
+									}
+									if (name != null) {
+										Rol rol = new Rol();
+										rol.setNom(name);
+										rol.setBaseDeDades(getCodi());
+										roles.add(rol);
+									} else {
+										debugObject("Cannot parse name from object", roleObject, "");
+									}
 								}
+								found = true;
+							} catch (LDAPException e) {
+								if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+									break;
+								else
+									throw e;
 							}
-							found = true;
-						} catch (LDAPException e) {
-							if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
-								break;
-							else
-								throw e;
 						}
-
 					}
 				}
 			}
@@ -1683,6 +1714,8 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	public Account getAccountInfo(String userAccount) throws RemoteException, InternalErrorException {
 		try {
+			if (debugEnabled)
+				log.info("Fetching account "+userAccount+" from LDAP server");
 			ExtensibleObject eo = findExtensibleUser(userAccount);
 			if (eo == null)
 				return null;
@@ -1705,9 +1738,13 @@ public class CustomizableLDAPAgent extends Agent implements
 		List<RolGrant> grants = new LinkedList<RolGrant>();
 		LinkedList<Rol> roles;
 		try {
+			if (debugEnabled)
+				log.info("Fetching account "+userAccount+" grants from LDAP server");
 			roles = new LinkedList<Rol>();
 			if (!populateRolesFromUser(userAccount, roles))
 				populateRolesFromRol(userAccount, roles);
+			if (debugEnabled)
+				log.info("Returning "+roles.size()+" grants");
 			for (Rol role : roles)
 			{
 				RolGrant rg = new RolGrant();
