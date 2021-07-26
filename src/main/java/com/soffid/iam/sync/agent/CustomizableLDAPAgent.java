@@ -3,6 +3,7 @@ package com.soffid.iam.sync.agent;
 import java.io.UnsupportedEncodingException;
 import java.rmi.RemoteException;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -13,6 +14,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 import com.novell.ldap.LDAPAttribute;
 import com.novell.ldap.LDAPAttributeSet;
@@ -20,7 +22,6 @@ import com.novell.ldap.LDAPConnection;
 import com.novell.ldap.LDAPControl;
 import com.novell.ldap.LDAPEntry;
 import com.novell.ldap.LDAPException;
-import com.novell.ldap.LDAPJSSESecureSocketFactory;
 import com.novell.ldap.LDAPModification;
 import com.novell.ldap.LDAPReferralException;
 import com.novell.ldap.LDAPSearchConstraints;
@@ -30,6 +31,7 @@ import com.novell.ldap.controls.LDAPPagedResultsResponse;
 import com.soffid.iam.api.Group;
 
 import es.caib.seycon.ng.comu.Account;
+import es.caib.seycon.ng.comu.AccountType;
 import es.caib.seycon.ng.comu.AttributeDirection;
 import es.caib.seycon.ng.comu.AttributeMapping;
 import es.caib.seycon.ng.comu.Grup;
@@ -54,7 +56,6 @@ import es.caib.seycon.ng.sync.intf.ExtensibleObject;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMapping;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMgr;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjects;
-import es.caib.seycon.ng.sync.intf.ReconcileMgr;
 import es.caib.seycon.ng.sync.intf.ReconcileMgr2;
 import es.caib.seycon.ng.sync.intf.RoleMgr;
 import es.caib.seycon.ng.sync.intf.UserMgr;
@@ -232,14 +233,17 @@ public class CustomizableLDAPAgent extends Agent implements
 							mods = new LDAPModification[modList.size()];
 							mods = (LDAPModification[]) modList.toArray(mods);
 							debugModifications("Modifying password ", ldapUser.getDN(), mods);
-							try {
-								pool.getConnection().modify(dn, mods);
-							} finally {
-								pool.returnConnection();
+							if (preUpdate(soffidObject, object , ldapUser)) {
+								try {
+									pool.getConnection().modify(dn, mods);
+								} finally {
+									pool.returnConnection();
+								}
+								log.info(
+										"UpdateUserPassword - setting password for user {}",
+										dn, null);
+								postUpdate(soffidObject, object, ldapUser);
 							}
-							log.info(
-									"UpdateUserPassword - setting password for user {}",
-									dn, null);
 						}
 						return;
 					} catch (LDAPException e) {
@@ -871,7 +875,7 @@ public class CustomizableLDAPAgent extends Agent implements
 	}
 
 	LinkedList<ExtensibleObject> getLdapObjects(SoffidObjectType type,
-			String first, int count) throws LDAPException,
+			String first, String nextChange, int count) throws LDAPException,
 			InternalErrorException {
 
 		LDAPConnection conn;
@@ -892,10 +896,16 @@ public class CustomizableLDAPAgent extends Agent implements
 				if (mapping.getSoffidObject().equals(type)) {
 					ExtensibleObject dummySystemObject = objectTranslator
 							.generateObject(dummySoffidObj, mapping, true);
+					
 
 					StringBuffer sb = new StringBuffer();
 					boolean any = buildQuery(dummySystemObject, sb);
 
+					String att = mapping.getProperties().get("modifyTimestamp");
+					if (att != null && nextChange != null) {
+						sb.insert(0, "&(");
+						sb.append("("+att+">="+nextChange+"))");
+					}
 					if (any) {
 						LDAPConnection lc = conn;
 						LDAPSearchConstraints oldConst = lc
@@ -1087,7 +1097,7 @@ public class CustomizableLDAPAgent extends Agent implements
 			if (debugEnabled)
 				log.info("Getting roles list");
 			for (ExtensibleObject eo : getLdapObjects(
-					SoffidObjectType.OBJECT_ROLE, null, 0)) {
+					SoffidObjectType.OBJECT_ROLE, null, null, 0)) {
 				ExtensibleObjects parsed = objectTranslator
 						.parseInputObjects(eo);
 				for (ExtensibleObject parsedObject : parsed.getObjects()) {
@@ -1347,7 +1357,7 @@ public class CustomizableLDAPAgent extends Agent implements
 		Account account = getServer().getAccountInfo(userName, getCodi());
 		ExtensibleObjects objects;
 		try {
-			if (account == null) {
+			if (account == null || removeDisabledUser(account)) {
 				account = new Account();
 				account.setName(userName);
 				account.setDescription(userName);
@@ -1378,6 +1388,17 @@ public class CustomizableLDAPAgent extends Agent implements
 		} catch (Exception e) {
 			throw new InternalErrorException("Error removing user", e);
 		}
+	}
+
+	private boolean removeDisabledUser(Account account) {
+		for (ExtensibleObjectMapping mapping: objectMappings) {
+			if (mapping.getSoffidObject() == SoffidObjectType.OBJECT_ACCOUNT && account.getType() != AccountType.USER ||
+					mapping.getSoffidObject() == SoffidObjectType.OBJECT_USER && account.getType() == AccountType.USER) {
+				if ("true".equals(mapping.getProperties().get("removeDisabledAccounts")))
+					return true;
+			}
+		}
+		return false;
 	}
 
 	public void updateUserPassword(String userName, Usuari userData,
@@ -1479,13 +1500,16 @@ public class CustomizableLDAPAgent extends Agent implements
 	}
 
 	private String firstChange = null;
-
+	Long currentTime = null;
+	
 	public Collection<AuthoritativeChange> getChanges(String nextChange)
 			throws InternalErrorException {
 		Collection<AuthoritativeChange> changes = new LinkedList<AuthoritativeChange>();
 		try {
+			if (currentTime == null)
+				currentTime = new Long(System.currentTimeMillis());
 			LinkedList<ExtensibleObject> objects = getLdapObjects(
-					SoffidObjectType.OBJECT_USER, firstChange, pagesize);
+					SoffidObjectType.OBJECT_USER, firstChange, nextChange, pagesize);
 			if (objects.isEmpty()) {
 				firstChange = null;
 			}
@@ -1591,7 +1615,13 @@ public class CustomizableLDAPAgent extends Agent implements
 	}
 
 	public String getNextChange() throws InternalErrorException {
-		return null;
+		if (currentTime == null)
+			return null;
+		else {
+			final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss.SSS'Z'");
+			dateFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+			return dateFormat.format(new Date(currentTime));
+		}
 	}
 
 	void debugObject(String msg, Map<String, Object> obj, String indent) {
