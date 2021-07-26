@@ -141,7 +141,15 @@ public class CustomizableLDAPAgent extends Agent implements
 		log.info("Starting LDAPAgente agent on {}: {}", getDispatcher()
 				.getCodi(), loginDN);
 		// password = params[1];
+		ssl = "true".equals(getDispatcher().getParam9());
 		ldapHost = getDispatcher().getParam2();
+		int i = ldapHost.lastIndexOf(':');
+		if (i > 0 ) {
+			ldapPort = Integer.parseInt(ldapHost.substring(i+1));
+			ldapHost = ldapHost.substring(0, i);
+		} else {
+			ldapPort = ssl ? LDAPConnection.DEFAULT_SSL_PORT: LDAPConnection.DEFAULT_PORT; 
+		}
 		passwordAttribute = getDispatcher().getParam3();
 		if (passwordAttribute == null)
 			passwordAttribute = "userPassword";
@@ -152,7 +160,6 @@ public class CustomizableLDAPAgent extends Agent implements
 		if (passwordPrefix == null)
 			hashType = "{" + hashType + "}";
 		baseDN = getDispatcher().getParam7();
-		ssl = "true".equals(getDispatcher().getParam9());
 
 		debugEnabled = "true".equals(getDispatcher().getParam8());
 		log.info("Debug mode: "+debugEnabled);
@@ -645,6 +652,8 @@ public class CustomizableLDAPAgent extends Agent implements
 		try {
 			StringBuffer buf = new StringBuffer();
 			buildQuery(objectQuery, buf);
+			if (debugEnabled)
+				log.info("Performing query " + buf.toString());
 			try {
 				Collection<ExtensibleObject> objs = new LinkedList<ExtensibleObject>();
 				LDAPSearchResults query = conn.search(baseDN,
@@ -714,8 +723,6 @@ public class CustomizableLDAPAgent extends Agent implements
 			buf.append(")");
 		}
 		
-		if (debugEnabled)
-			log.info("Performing query " + buf.toString());
 		return any;
 	}
 
@@ -750,6 +757,8 @@ public class CustomizableLDAPAgent extends Agent implements
 
 					StringBuffer sb = new StringBuffer();
 					boolean any = buildQuery(dummySystemObject, sb);
+					if (debugEnabled)
+						log.info("Performing query " + sb.toString());
 
 					if (any) {
 						if (debugEnabled)
@@ -901,12 +910,16 @@ public class CustomizableLDAPAgent extends Agent implements
 					StringBuffer sb = new StringBuffer();
 					boolean any = buildQuery(dummySystemObject, sb);
 
-					String att = mapping.getProperties().get("modifyTimestamp");
-					if (att != null && nextChange != null) {
-						sb.insert(0, "&(");
-						sb.append("("+att+">="+nextChange+"))");
-					}
 					if (any) {
+						if (debugEnabled)
+							log.info("Performing query " + sb.toString());
+						String att = mapping.getProperties().get("modifyTimestamp");
+						if (att != null && nextChange != null) {
+							sb.insert(0, "(&");
+							sb.append("("+att+">="+nextChange+"))");
+						}
+						if (debugEnabled)
+							log.info("Performing query " + sb.toString());
 						LDAPConnection lc = conn;
 						LDAPSearchConstraints oldConst = lc
 								.getSearchConstraints(); // Save search
@@ -1252,6 +1265,8 @@ public class CustomizableLDAPAgent extends Agent implements
 						debugObject("Searching grants from LDAP object", systemObject, "");
 					boolean any = buildQuery(systemObject, sb);
 					if (any && baseDN != null) {
+						if (debugEnabled)
+							log.info("Performing query " + sb.toString());
 						String keyAttribute=objectMapping.getProperties().get("key");
 						String[] atts = keyAttribute == null ? null: new String[] {keyAttribute};
 						LDAPSearchResults search = conn.search(baseDN,
@@ -1507,7 +1522,7 @@ public class CustomizableLDAPAgent extends Agent implements
 		Collection<AuthoritativeChange> changes = new LinkedList<AuthoritativeChange>();
 		try {
 			if (currentTime == null)
-				currentTime = new Long(System.currentTimeMillis());
+				currentTime = new Long(System.currentTimeMillis() - 300000L); // 5 minutes clock skew
 			LinkedList<ExtensibleObject> objects = getLdapObjects(
 					SoffidObjectType.OBJECT_USER, firstChange, nextChange, pagesize);
 			if (objects.isEmpty()) {
