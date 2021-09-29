@@ -955,7 +955,7 @@ public class CustomizableLDAPAgent extends Agent implements
 										ExtensibleObject eo = parseEntry(entry,
 												mapping);
 										objects.add(eo);
-										if (count-- == 0)
+										if (--count == 0)
 											break;
 									}
 								} catch (LDAPException e) {
