@@ -7,81 +7,6 @@
 	<version>${pom.version}</version>
 	<agent>
 		<name>LDAP</name>
-		<javaClass>com.soffid.iam.sync.agent.LDAPAgent</javaClass>
-		<javaClassV2>-</javaClassV2>
-		<userInterface>LDAPAgent.zul</userInterface>
-		<enableAccessControl>false</enableAccessControl>
-	</agent>
-	<agent>
-		<name>LDAP-Custom</name>
-		<javaClass>com.soffid.iam.sync.agent.CustomizableLDAPAgent</javaClass>
-		<javaClassV2>-</javaClassV2>
-		<userInterface>LDAPCustomAgent.zul</userInterface>
-		<authoritativeSource>true</authoritativeSource>
-		<enableAccessControl>false</enableAccessControl>
-		<enableAttributeMapping>true</enableAttributeMapping>
-
-		<object systemObject="user" soffidObject="user">
-
-			<mapping soffidAttribute='"inetOrgPerson"' systemAttribute='objectClass'
-				direction="out" />
-			<mapping
-				soffidAttribute='accountName == null ? "dc=soffid,dc=org" : "cn="+accountName+",dc=soffid,dc=org";'
-				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='accountName' systemAttribute='cn'
-				direction="inout" />
-			<mapping soffidAttribute='firstName' systemAttribute='givenName'
-				direction="in" />
-			<mapping soffidAttribute='lastName' systemAttribute='sn'
-				direction="inout" />
-			<mapping soffidAttribute='id' systemAttribute='uid'
-				direction="inout" />
-			<mapping
-				soffidAttribute='shortName==null ? attributes{"MAIL"} : shortName+"@"+mailDomain'
-				systemAttribute='mail' direction="out" />
-			<mapping soffidAttribute='primaryGroup' systemAttribute='departmentNumber'
-				direction="out" />
-			<mapping soffidAttribute='primaryGroup' systemAttribute='departmentNumber == null ? "enterprise" : departmentNumber'
-				direction="in" />
-			<mapping soffidAttribute='attributes{"employeeNumber"}' systemAttribute='employeeNumber'
-							direction="inout" />
-			<mapping soffidAttribute='attributes{"employeeType"}' systemAttribute='employeeType'
-							direction="inout" />
-
-		</object>
-
-		<object systemObject="account" soffidObject="account">
-			<mapping soffidAttribute='"inetOrgPerson"' systemAttribute='objectClass'
-				direction="out" />
-			<mapping
-				soffidAttribute='accountName == null ? "dc=soffid,dc=org" : "cn="+accountName+",dc=soffid,dc=org";'
-				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='accountName' systemAttribute='cn'
-				direction="inout" />
-			<mapping soffidAttribute='accountDescription' systemAttribute='sn'
-				direction="inout" />
-		</object>
-
-		<object systemObject="role" soffidObject="role">
-			<mapping soffidAttribute='"groupOfNames"' systemAttribute='objectClass'
-				direction="out" />
-			<mapping
-				soffidAttribute='name == null ? "dc=soffid,dc=org" : "cn="+name+",dc=soffid,dc=org"'
-				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='name' systemAttribute='cn'
-				direction="inout" />
-			<mapping soffidAttribute='description' systemAttribute='description'
-				direction="inout" />
-			<mapping
-				soffidAttribute='v = grantedAccountNames; if (v.size() == 0) reutrn "cn=nobody, dc=org"; members = new String[v.size()]; for (i=0; i &lt; members.length; i++) members[i]="cn="+v.get(i)+",dc=soffid,dc=org"; return members;'
-				systemAttribute='member' direction="out" />
-		</object>
-
-
-	</agent>
-
-	<agent>
-		<name>LDAP-Custom (with triggers)</name>
 		<javaClass>com.soffid.iam.sync.agent.CustomizableLDAPAgent2</javaClass>
 		<javaClassV2>com.soffid.iam.sync.agent2.CustomizableLDAPAgent</javaClassV2>
 		<userInterface>LDAPCustomAgent.zul</userInterface>
@@ -90,32 +15,27 @@
 		<enableAttributeMapping>true</enableAttributeMapping>
 		<enableObjectTriggers>true</enableObjectTriggers>
 
+
 		<object systemObject="user" soffidObject="user">
 
 			<mapping soffidAttribute='"inetOrgPerson"' systemAttribute='objectClass'
 				direction="out" />
 			<mapping
-				soffidAttribute='accountName == null ? "dc=soffid,dc=org" : "cn="+accountName+",dc=soffid,dc=org";'
-				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='accountName' systemAttribute='cn'
-				direction="inout" />
+				soffidAttribute='accountName'
+				systemAttribute='dn' direction="inout" />
 			<mapping soffidAttribute='firstName' systemAttribute='givenName'
 				direction="in" />
 			<mapping soffidAttribute='lastName' systemAttribute='sn'
 				direction="inout" />
 			<mapping soffidAttribute='id' systemAttribute='uid'
-				direction="inout" />
+				direction="out" />
 			<mapping
-				soffidAttribute='shortName==null ? attributes{"MAIL"} : shortName+"@"+mailDomain'
+				soffidAttribute='mailDomain==void || mailDomain==null ? attributes{"EMAIL"} : shortName+"@"+mailDomain'
 				systemAttribute='mail' direction="out" />
 			<mapping soffidAttribute='primaryGroup' systemAttribute='departmentNumber'
 				direction="out" />
 			<mapping soffidAttribute='primaryGroup' systemAttribute='departmentNumber == null ? "enterprise" : departmentNumber'
 				direction="in" />
-			<mapping soffidAttribute='attributes{"employeeNumber"}' systemAttribute='employeeNumber'
-							direction="inout" />
-			<mapping soffidAttribute='attributes{"employeeType"}' systemAttribute='employeeType'
-							direction="inout" />
 
 		</object>
 
@@ -123,29 +43,23 @@
 			<mapping soffidAttribute='"inetOrgPerson"' systemAttribute='objectClass'
 				direction="out" />
 			<mapping
-				soffidAttribute='accountName == null ? "dc=soffid,dc=org" : "cn="+accountName+",dc=soffid,dc=org";'
-				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='accountName' systemAttribute='cn'
-				direction="inout" />
-			<mapping soffidAttribute='accountDescription' systemAttribute='sn'
-				direction="inout" />
+				soffidAttribute='accountName'
+				systemAttribute='dn' direction="inout" />
+			<mapping soffidAttribute='accountDescription' systemAttribute='cn'
+				direction="in" />
 		</object>
 
 		<object systemObject="role" soffidObject="role">
 			<mapping soffidAttribute='"groupOfNames"' systemAttribute='objectClass'
 				direction="out" />
 			<mapping
-				soffidAttribute='name == null ? "dc=soffid,dc=org" : "cn="+name+",dc=soffid,dc=org"'
+				soffidAttribute='name'
 				systemAttribute='dn' direction="out" />
-			<mapping soffidAttribute='name' systemAttribute='cn'
-				direction="inout" />
 			<mapping soffidAttribute='description' systemAttribute='description'
 				direction="inout" />
 			<mapping
-				soffidAttribute='v = grantedAccountNames; if (v.size() == 0) reutrn "cn=nobody, dc=org"; members = new String[v.size()]; for (i=0; i &lt; members.length; i++) members[i]="cn="+v.get(i)+",dc=soffid,dc=org"; return members;'
+				soffidAttribute='v = grantedAccountNames; if (v.size() == 0) return "cn=nobody, dc=org"; &#x0a;members = new String[v.size()]; &#x0a;for (i=0; i &lt; members.length; i++) members[i]=v.get(i);&#x0a;return members;'
 				systemAttribute='member' direction="out" />
 		</object>
-
-
 	</agent>
 </seuServerPlugin>
