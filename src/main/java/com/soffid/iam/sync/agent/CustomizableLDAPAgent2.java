@@ -66,21 +66,6 @@ public class CustomizableLDAPAgent2 extends
 		
 	}
 
-	private ExtensibleObject buildExtensibleObject(LDAPEntry currentEntry) {
-		ExtensibleObject old = new ExtensibleObject();
-		
-		for ( Iterator<LDAPAttribute> it = currentEntry.getAttributeSet().iterator(); it.hasNext(); ) {
-			LDAPAttribute att = it.next();
-			String [] v = att.getStringValueArray();
-			if (v.length == 1)
-				old.setAttribute(att.getName(), v[0]);
-			else
-				old.setAttribute(att.getName(), v);
-		}
-		old.setAttribute("dn", currentEntry.getDN());
-		return old;
-	}
-	
 	@Override
 	protected boolean preUpdate(ExtensibleObject soffidObject,
 			ExtensibleObject adObject, LDAPEntry currentEntry)

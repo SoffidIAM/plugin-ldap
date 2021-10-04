@@ -29,6 +29,7 @@ import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
 import com.novell.ldap.controls.LDAPPagedResultsResponse;
 import com.soffid.iam.api.Group;
+import com.soffid.iam.api.PasswordValidation;
 
 import es.caib.seycon.ng.comu.Account;
 import es.caib.seycon.ng.comu.AccountType;
@@ -1805,4 +1806,357 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 		return grants;
 	}
+	
+	public Collection<Map<String, Object>> invoke(String verb, String command,
+			Map<String, Object> params) throws RemoteException, InternalErrorException 
+	{
+		if ("add".equalsIgnoreCase(verb) || "insert".equalsIgnoreCase(verb))
+		{
+			return addLdapObject (command, params);
+		}
+		else if ("update".equalsIgnoreCase(verb) || "modify".equalsIgnoreCase(verb))
+		{
+			return modifyLdapObject (command, params);
+		}
+		else if ("delete".equalsIgnoreCase(verb) || "remove".equalsIgnoreCase(verb))
+		{
+			return deleteLdapObject (command, params);
+		}
+		else if ("select".equalsIgnoreCase(verb) || "query".equalsIgnoreCase(verb))
+		{
+			return queryLdapObjects (baseDN, command, params);
+		}
+		else if ("rename".equalsIgnoreCase(verb))
+		{
+			return renameLdapObjects (command, params);
+		}
+		else if ("get".equalsIgnoreCase(verb) || "read".equalsIgnoreCase(verb))
+		{
+			log.info("Getting "+baseDN+" "+command);
+			Collection<Map<String, Object>> l = getLdapObjects (baseDN, command, params);
+			Collection<Map<String,Object>> l2  = new LinkedList();
+			for (Map<String, Object> eo: l)
+			{
+				Map<String, Object> eo2 = new HashMap<String, Object>();
+				for (String key: eo.keySet())
+				{
+					eo2.put(key, eo.get(key));
+				}
+				l2.add(eo2);
+			}
+			return l2;
+		}
+		else if (verb.equals("checkPassword"))
+		{
+			Collection<Map<String, Object>> l = new LinkedList<Map<String, Object>>();
+			Map<String,Object> o = new HashMap<String, Object>();
+			l.add(o);
+			Account account = getServer().getAccountInfo(command, getDispatcher().getCodi());
+			if (account == null)
+				o.put("passwordStatus", null);
+			else 
+			{
+				try {
+					Password password = getServer().getAccountPassword(command, getDispatcher().getCodi());
+					PasswordValidation status = validateUserPassword(account.getName(), password) ? PasswordValidation.PASSWORD_GOOD: PasswordValidation.PASSWORD_WRONG;
+					o.put("passwordStatus", status);
+				} catch (InternalErrorException e) {
+					throw e;
+				} catch (Exception e) {
+					throw new InternalErrorException ("Error validating password for account "+account.getLoginName(),
+							e);
+				}
+			}
+			return l;
+		}
+
+		else
+		{
+			return queryLdapObjects (verb, command, params);
+		}
+	}
+
+	private Collection<Map<String, Object>> queryLdapObjects(String base, String queryString, Map<String, Object> params) throws InternalErrorException {
+		if (params.get("base") != null)
+			base = (String) params.get("base");
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				LinkedList<Map<String, Object>> result = new LinkedList<Map<String,Object>>();
+				
+				LDAPSearchConstraints constraints = new LDAPSearchConstraints(conn.getConstraints());
+				LDAPSearchResults query = conn.search(base,
+							LDAPConnection.SCOPE_SUB, queryString, null, false,
+							constraints);
+				while (query.hasMore()) {
+					try {
+						LDAPEntry entry = query.next();
+						result.add( buildExtensibleObject(entry) );
+					} 
+					catch (LDAPReferralException e)
+					{
+						// Ignore
+					}
+				}			
+				return result;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error performing LDAP query", e1);
+		}
+	}
+	
+	private Collection<Map<String, Object>> renameLdapObjects(String olddn, Map<String, Object> params) throws InternalErrorException {
+		String newdn = (String) params.get("dn");
+		
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				LinkedList<Map<String, Object>> result = new LinkedList<Map<String,Object>>();
+				
+				try {
+					LDAPEntry entry = conn.read(olddn);
+					if (entry != null) {
+						String[] split = splitDN(newdn);
+						String parentName =  mergeDN(split, 1);
+						conn.rename(entry.getDN(), split[0], parentName, true);
+					}
+				} 
+				catch (LDAPReferralException e)
+				{
+					// Ignore
+				}
+				catch (LDAPException e2)
+				{
+					if (e2.getResultCode() == LDAPException.NO_SUCH_OBJECT) {
+						// Ignore
+					} else {
+						log.debug("LDAP Exception: "+e2.toString());
+						log.debug("ERROR MESSAGE: "+e2.getLDAPErrorMessage());
+						log.debug("LOCALIZED MESSAGE: "+e2.getLocalizedMessage());
+						throw e2;
+					}
+				}
+				return result;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error performing LDAP query", e1);
+		}
+	}
+
+	private Collection<Map<String, Object>> getLdapObjects(String base, String queryString, Map<String, Object> params) throws InternalErrorException {
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				LinkedList<Map<String, Object>> result = new LinkedList<Map<String,Object>>();
+				
+				try {
+					LDAPEntry entry = conn.read(queryString);
+					result.add( buildExtensibleObject(entry) );
+				} 
+				catch (LDAPReferralException e)
+				{
+					// Ignore
+				}
+				catch (LDAPException e2)
+				{
+					if (e2.getResultCode() == LDAPException.NO_SUCH_OBJECT) {
+						// Ignore
+					} else {
+						log.debug("LDAP Exception: "+e2.toString());
+						log.debug("ERROR MESSAGE: "+e2.getLDAPErrorMessage());
+						log.debug("LOCALIZED MESSAGE: "+e2.getLocalizedMessage());
+						throw e2;
+					}
+				}
+				return result;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error performing LDAP query", e1);
+		}
+	}
+	
+	private Collection<Map<String, Object>> deleteLdapObject(String dn, Map<String, Object> params) throws InternalErrorException {
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				conn.delete(dn);
+				return null;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error performing LDAP query", e1);
+		}
+	}
+	
+	private Collection<Map<String, Object>> modifyLdapObject(String dn, Map<String, Object> params) throws InternalErrorException {
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				LDAPEntry entry = conn.read(dn);
+				List<LDAPModification> mods = new LinkedList<LDAPModification>();
+				for (String param: params.keySet())
+				{
+					if (!param.equals("dn"))
+					{
+						Object value = params.get(param);
+						LDAPAttribute previous = entry.getAttribute(param);
+						if (value == null
+								&& previous != null) {
+							mods.add(new LDAPModification(
+									LDAPModification.DELETE,
+									new LDAPAttribute(param)));
+						} else if (value != null
+								&& previous == null) {
+							if (value instanceof byte[]) {
+								mods.add(new LDAPModification(
+										LDAPModification.ADD,
+										new LDAPAttribute(param,
+												(byte[]) value)));
+							} else  if (value instanceof String[]) {
+								mods.add(new LDAPModification(
+										LDAPModification.ADD,
+										new LDAPAttribute(param, (String[])value)));
+							} else {
+								mods.add(new LDAPModification(
+										LDAPModification.ADD,
+										new LDAPAttribute(param, value.toString())));
+							}
+						} else if ((value != null)
+								&& (previous != null)) {
+							if (value instanceof byte[]) {
+								mods.add(new LDAPModification(
+										LDAPModification.REPLACE,
+										new LDAPAttribute(param,
+												(byte[]) value)));
+							} else  if (value instanceof String[]) {
+								mods.add(new LDAPModification(
+										LDAPModification.REPLACE,
+										new LDAPAttribute(param, (String[])value)));
+							} else {
+								mods.add(new LDAPModification(
+										LDAPModification.REPLACE,
+										new LDAPAttribute(param, value.toString())));
+							}
+						}
+					}
+				}
+				if (debugEnabled)
+					debugModifications("Modifying object ",
+						dn,
+						mods.toArray(new LDAPModification[0]));
+				conn.modify(dn, mods.toArray(new LDAPModification[0]));
+				return null;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error modifying LDAP query", e1);
+		}
+	}
+	
+	protected Collection<Map<String, Object>> addLdapObject(String dn, Map<String, Object> params) throws InternalErrorException {
+		try {
+			LDAPConnection conn = pool.getConnection();
+			try
+			{
+				LDAPAttributeSet attributes = new LDAPAttributeSet();
+				for (String param: params.keySet())
+				{
+					Object value = params.get(param);
+					if (value == null)
+					{
+						// Nothing to do
+					}
+					else if (value instanceof byte[]) 
+					{
+						attributes.add(
+								new LDAPAttribute(param,
+										(byte[]) value));
+					} else  if (value instanceof String[]) {
+						attributes.add(new LDAPAttribute(param, (String[])value));
+					} else {
+						attributes.add(new LDAPAttribute(param, value.toString()));
+					}
+				}
+				if (debugEnabled)
+					debugEntry("Creating object", dn, attributes);
+				conn.add( new LDAPEntry(dn, attributes));
+				return null;
+			} finally {
+				pool.returnConnection();
+			}
+		} catch (Exception e1) {
+			throw new InternalErrorException ("Error modifying LDAP query", e1);
+		}
+		
+	}
+
+
+	protected ExtensibleObject buildExtensibleObject(LDAPEntry currentEntry) {
+		ExtensibleObject old = new ExtensibleObject();
+		
+		for ( Iterator<LDAPAttribute> it = currentEntry.getAttributeSet().iterator(); it.hasNext(); ) {
+			LDAPAttribute att = it.next();
+			String [] v = att.getStringValueArray();
+			if (v.length == 1)
+				old.setAttribute(att.getName(), v[0]);
+			else
+				old.setAttribute(att.getName(), v);
+		}
+		old.setAttribute("dn", currentEntry.getDN());
+		return old;
+	}
+	
+	private String[] splitDN (String dn)
+	{
+		List <String> s = new LinkedList<String>();
+		int start = 0;
+		int i = 1;
+		do
+		{
+			i = dn.indexOf(",", i);
+			if (i < 0)
+			{
+				s.add(dn.substring(start));
+				break;
+			}
+			if (i > 0 && dn.charAt(i-1) != '\\')
+			{
+				s.add( dn.substring(start, i));
+				start = i+1;
+			}
+			i ++;
+		} while (true);
+		return s.toArray(new String[s.size()]);
+	}
+	
+	private String mergeDN(String[] parts, int position) {
+		String dn = "";
+		for (int i = position; i < parts.length; i++)
+		{
+			if ( i > position ) dn += ",";
+			dn += parts[i];
+		}
+		return dn;
+	}
+
+	public ExtensibleObject find(ExtensibleObject pattern) throws Exception {
+		LDAPEntry entry = buscarUsuario(pattern);
+		if (entry == null)
+			return null;
+		return buildExtensibleObject(entry);
+	}
+
 }
