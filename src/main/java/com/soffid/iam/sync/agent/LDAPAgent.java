@@ -132,11 +132,6 @@ public class LDAPAgent extends Agent implements UserMgr, RoleMgr, GroupMgr {
 		} 
 	}
 
-	public boolean ValidateUserPassword(String user, Password password)
-			throws RemoteException, InternalErrorException {
-		return false;
-	}
-
 	/**
 	 * Actualiza la contraseña del usuario. Genera la ofuscación SHA-1 y la
 	 * asigna al atributo userpassword de la clase inetOrgPerson

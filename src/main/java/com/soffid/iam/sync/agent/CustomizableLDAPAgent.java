@@ -5,6 +5,7 @@ import java.rmi.RemoteException;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
@@ -17,13 +18,16 @@ import java.util.Set;
 import java.util.TimeZone;
 
 import com.novell.ldap.LDAPAttribute;
+import com.novell.ldap.LDAPAttributeSchema;
 import com.novell.ldap.LDAPAttributeSet;
 import com.novell.ldap.LDAPConnection;
 import com.novell.ldap.LDAPControl;
 import com.novell.ldap.LDAPEntry;
 import com.novell.ldap.LDAPException;
+import com.novell.ldap.LDAPJSSESecureSocketFactory;
 import com.novell.ldap.LDAPModification;
 import com.novell.ldap.LDAPReferralException;
+import com.novell.ldap.LDAPSchema;
 import com.novell.ldap.LDAPSearchConstraints;
 import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
@@ -36,6 +40,7 @@ import es.caib.seycon.ng.comu.AccountType;
 import es.caib.seycon.ng.comu.AttributeDirection;
 import es.caib.seycon.ng.comu.AttributeMapping;
 import es.caib.seycon.ng.comu.Grup;
+import es.caib.seycon.ng.comu.LlistaCorreu;
 import es.caib.seycon.ng.comu.ObjectMapping;
 import es.caib.seycon.ng.comu.Password;
 import es.caib.seycon.ng.comu.Rol;
@@ -46,6 +51,7 @@ import es.caib.seycon.ng.exception.InternalErrorException;
 import es.caib.seycon.ng.exception.UnknownUserException;
 import es.caib.seycon.ng.sync.agent.Agent;
 import es.caib.seycon.ng.sync.engine.extobj.AccountExtensibleObject;
+import es.caib.seycon.ng.sync.engine.extobj.MailListExtensibleObject;
 import es.caib.seycon.ng.sync.engine.extobj.ObjectTranslator;
 import es.caib.seycon.ng.sync.engine.extobj.RoleExtensibleObject;
 import es.caib.seycon.ng.sync.engine.extobj.UserExtensibleObject;
@@ -57,6 +63,7 @@ import es.caib.seycon.ng.sync.intf.ExtensibleObject;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMapping;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjectMgr;
 import es.caib.seycon.ng.sync.intf.ExtensibleObjects;
+import es.caib.seycon.ng.sync.intf.MailAliasMgr;
 import es.caib.seycon.ng.sync.intf.ReconcileMgr2;
 import es.caib.seycon.ng.sync.intf.RoleMgr;
 import es.caib.seycon.ng.sync.intf.UserMgr;
@@ -73,6 +80,7 @@ import es.caib.seycon.util.Base64;
 
 public class CustomizableLDAPAgent extends Agent implements
 		ExtensibleObjectMgr, UserMgr, ReconcileMgr2, RoleMgr,
+		MailAliasMgr,
 		AuthoritativeIdentitySource2 {
 	boolean ssl;
 	ValueObjectMapper vom = new ValueObjectMapper();
@@ -133,7 +141,7 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	static HashMap<String, LDAPPool> pools = new HashMap<String, LDAPPool>();
 
-	LDAPPool pool;
+	protected LDAPPool pool;
 
 	@Override
 	public void init() throws InternalErrorException {
@@ -232,6 +240,9 @@ public class CustomizableLDAPAgent extends Agent implements
 						ArrayList modList = new ArrayList();
 						if (ldapUser != null) {
 							String hash = getHashPassword(password);
+							object.put(passwordAttribute, hash);
+							soffidObject.put("password", password);
+							soffidObject.put("mustChange", mustchange);
 							atributo = new LDAPAttribute(passwordAttribute,
 									hash);
 							modList.add(new LDAPModification(
@@ -327,7 +338,8 @@ public class CustomizableLDAPAgent extends Agent implements
 					log.info("No key property defined. Searching dn "+dn);
 				return conn.read(dn);
 			}
-			else {
+			else 
+			{
 				Object oc = object.getAttribute("objectClass");
 				String queryString = "(&";
 				if (oc instanceof String[])
@@ -378,7 +390,9 @@ public class CustomizableLDAPAgent extends Agent implements
 	 */
 	private String getHashPassword(Password password) {
 		String hash = null;
-		if (digest == null )
+		if (password == null)
+			return null;
+		else if (digest == null )
 			hash = password.getPassword();
 		else {
 			synchronized (digest) {
@@ -391,11 +405,18 @@ public class CustomizableLDAPAgent extends Agent implements
 		return hash;
 	}
 
-	private String[] toStringArray(Object obj) {
+	private Object[] toStringArray(Object obj) {
 		if (obj == null)
 			return null;
+		else if (obj instanceof List) {
+			return toStringArray(((List)obj).toArray());
+		}
 		else if (obj instanceof String[]) {
 			return (String[]) obj;
+		} else if (obj instanceof byte[][]) {
+			return (byte[][])obj;
+		} else if (obj instanceof byte[]) {
+			return new byte[][]{(byte[])obj};
 		} else if (obj instanceof Object[]) {
 			return vom.toStringArray((Object[]) obj);
 		} else if ("".equals(obj))
@@ -441,11 +462,10 @@ public class CustomizableLDAPAgent extends Agent implements
 							{
 								LDAPAttributeSet attributeSet = new LDAPAttributeSet();
 								for (String attribute : obj.getAttributes()) {
-									String values[] = toStringArray(obj
-											.getAttribute(attribute));
-									if (values != null && !"dn".equals(attribute)) {
-										LDAPAttribute att = new LDAPAttribute(
-												attribute, values);
+									Object[] valuesObject = toStringArray(obj.getAttribute(attribute));
+									if (valuesObject != null && !"dn".equals(attribute)) {
+										LDAPAttribute att;
+										att = populateAttribute(attribute, valuesObject);
 										attributeSet.add(att);
 										if (debugEnabled)
 											debugAttribute(LDAPModification.ADD,
@@ -470,7 +490,8 @@ public class CustomizableLDAPAgent extends Agent implements
 									} else {
 										p = getServer().generateFakePassword(
 												accountName, getCodi());
-										updatePassword(accountName, objects, soffidObject, p,
+										if (p != null)
+											updatePassword(accountName, objects, soffidObject, p,
 												true);
 									}
 								}
@@ -488,10 +509,11 @@ public class CustomizableLDAPAgent extends Agent implements
 									if (!"dn".equals(attribute)
 											&& !"objectClass".equals(attribute)) {
 										Object v = obj.getAttribute(attribute);
-										String[] value = toStringArray(obj
-												.getAttribute(attribute));
-										if (value != null && value.length == 1
-												&& value[0].trim().length() == 0)
+										Object[] value = toStringArray(obj.getAttribute(attribute));
+										if (value != null && 
+												(value instanceof String[]) &&
+												((String[])value).length == 1 &&
+												((String[])value)[0].trim().isEmpty())
 											value = null;
 										if (value == null
 												&& entry.getAttribute(attribute) != null) {
@@ -502,16 +524,13 @@ public class CustomizableLDAPAgent extends Agent implements
 												&& entry.getAttribute(attribute) == null) {
 											modList.add(new LDAPModification(
 													LDAPModification.ADD,
-													new LDAPAttribute(attribute,
-															value)));
+													populateAttribute(attribute, value)));
 										} else if (value != null
 												&& entry.getAttribute(attribute) != null) {
-											if (v instanceof byte[])
+											if (v instanceof byte[][] )
 												modList.add(new LDAPModification(
 														LDAPModification.REPLACE,
-														new LDAPAttribute(
-																attribute,
-																(byte[]) v)));
+														populateAttribute(attribute, value)));
 											else {
 												boolean update = false;
 												String[] oldvalue = entry
@@ -531,7 +550,7 @@ public class CustomizableLDAPAgent extends Agent implements
 												if (update)
 													modList.add(new LDAPModification(
 															LDAPModification.REPLACE,
-															new LDAPAttribute(
+															populateAttribute(
 																	attribute,
 																	value)));
 	
@@ -588,6 +607,18 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 	}
 
+	protected LDAPAttribute populateAttribute(String attribute, Object[] valuesObject) {
+		LDAPAttribute att;
+		if (valuesObject instanceof byte[][]) {
+			att = new LDAPAttribute(attribute) ;
+			for (byte[] data: (byte[][])valuesObject)
+				att.addValue(data);
+		}
+		else
+			att = new LDAPAttribute(attribute, (String[]) valuesObject);
+		return att;
+	}
+
 	public void removeObjects(ExtensibleObjects objects, ExtensibleObject soffidObject) throws Exception {
 		LDAPConnection conn = pool.getConnection();
 		try {
@@ -622,6 +653,10 @@ public class CustomizableLDAPAgent extends Agent implements
 			throws RemoteException, InternalErrorException {
 		try {
 			LDAPConnection conn = new LDAPConnection();
+			if (ssl)
+				conn = new LDAPConnection(new LDAPJSSESecureSocketFactory());
+			else
+				conn = new LDAPConnection();
 			conn.connect(ldapHost, ldapPort);
 			conn.bind(ldapVersion, loginDN,
 					password.getPassword().getBytes("UTF8"));
@@ -700,16 +735,16 @@ public class CustomizableLDAPAgent extends Agent implements
 		int attributes = 0;
 		for (String attribute : objectQuery.getAttributes()) {
 			if (!attribute.equals("dn")) {
-				String[] values = toStringArray(objectQuery
+				Object[] values = toStringArray(objectQuery
 						.getAttribute(attribute));
 				if (values != null && values.length > 0) {
 					any = true;
 					attributes ++;
 					if (values.length > 1)
 						buf.append("(|");
-					for (String value : values) {
+					for (Object value : values) {
 						buf.append("(").append(attribute).append("=")
-								.append(escapeLDAPSearchFilter(value))
+								.append(escapeLDAPSearchFilter(value.toString()))
 								.append(")");
 					}
 					if (values.length > 1)
@@ -789,7 +824,7 @@ public class CustomizableLDAPAgent extends Agent implements
 								try {
 									LDAPEntry entry = searchResults.next();
 									debugEntry("Got object", entry.getDN(), entry.getAttributeSet());
-									ExtensibleObject eo = parseEntry(entry,
+									ExtensibleObject eo = parseEntry(conn, entry,
 											mapping);
 									ExtensibleObjects parsed = objectTranslator
 											.parseInputObjects(eo);
@@ -953,7 +988,7 @@ public class CustomizableLDAPAgent extends Agent implements
 										if (entry.getDN().equals(first))
 											start = true;
 									} else {
-										ExtensibleObject eo = parseEntry(entry,
+										ExtensibleObject eo = parseEntry(conn, entry,
 												mapping);
 										objects.add(eo);
 										if (--count == 0)
@@ -1008,16 +1043,45 @@ public class CustomizableLDAPAgent extends Agent implements
 		return new LinkedList<String>(accounts);
 	}
 
-	public ExtensibleObject parseEntry(LDAPEntry entry, ObjectMapping mapping) {
+	
+	LDAPSchema schema = null;
+	String[] binaySchemas = new String[] {
+			"1.3.6.1.4.1.1466.115.121.1.10",
+			"1.3.6.1.4.1.1466.115.121.1.23",
+			"1.3.6.1.4.1.1466.115.121.1.28",
+			"1.3.6.1.4.1.1466.115.121.1.5",
+			"1.3.6.1.4.1.1466.115.121.1.8",
+			"1.3.6.1.4.1.1466.115.121.1.9"
+	};
+	protected boolean isBinary(LDAPConnection conn, String attributeName) throws LDAPException {
+		if (schema == null) {
+			String c = conn.getSchemaDN();
+			schema = conn.fetchSchema(c);
+		}
+		LDAPAttributeSchema p = schema.getAttributeSchema(attributeName);
+		if (p == null)
+			return false;
+
+		String syntax = p.getSyntaxString();
+		if (syntax == null)
+			return false;
+		final int pos = Arrays.binarySearch(binaySchemas, syntax);
+		return pos >= 0;
+	}
+	
+	public ExtensibleObject parseEntry(LDAPConnection conn, LDAPEntry entry, ObjectMapping mapping) throws LDAPException {
 		ExtensibleObject eo = new ExtensibleObject();
 		eo.setAttribute("dn", entry.getDN());
 		eo.setObjectType(mapping.getSystemObject());
 		for (Object obj : entry.getAttributeSet()) {
 			LDAPAttribute att = (LDAPAttribute) obj;
-			if (att.getStringValueArray().length == 1)
-				eo.setAttribute(att.getName(), att.getStringValue());
+			if (isBinary(conn, att.getBaseName())) {
+				eo.setAttribute(att.getBaseName(), att.getByteValueArray());				
+			}
+			else if (att.getStringValueArray().length == 1)
+				eo.setAttribute(att.getBaseName(), att.getStringValue());
 			else
-				eo.setAttribute(att.getName(), att.getStringValueArray());
+				eo.setAttribute(att.getBaseName(), att.getStringValueArray());
 		}
 		return eo;
 	}
@@ -1097,7 +1161,12 @@ public class CustomizableLDAPAgent extends Agent implements
 				// Search object by dn
 				LDAPEntry entry = buscarUsuario(systemObject);
 				if (entry != null) {
-					return parseEntry(entry, objectMapping);
+					LDAPConnection conn = pool.getConnection();
+					try {
+						return parseEntry(conn, entry, objectMapping);
+					} finally {
+						pool.returnConnection();
+					}
 				}
 			}
 		}
@@ -1148,21 +1217,26 @@ public class CustomizableLDAPAgent extends Agent implements
 					for (ExtensibleObjectMapping objectMapping : objectMappings) {
 						if (objectMapping.getSoffidObject().toString().equals(
 								rolObject.getObjectType().toString())) {
-							ExtensibleObject eo = parseEntry(entry,
-									objectMapping);
-							if (debugEnabled)
-								debugObject("Translated to native object", eo, "");
-							ExtensibleObject parsed = objectTranslator
-									.parseInputObject(eo, objectMapping);
-							if (parsed != null) {
+							LDAPConnection conn = pool.getConnection();
+							try {
+								ExtensibleObject eo = parseEntry(conn, entry,
+										objectMapping);
 								if (debugEnabled)
-									debugObject("Translated to Soffid object", parsed, "");
-								Rol rol = vom.parseRol(parsed);
-								if (rol != null) {
+									debugObject("Translated to native object", eo, "");
+								ExtensibleObject parsed = objectTranslator
+										.parseInputObject(eo, objectMapping);
+								if (parsed != null) {
 									if (debugEnabled)
-										log.info(rol.toString());
-									return rol;
+										debugObject("Translated to Soffid object", parsed, "");
+									Rol rol = vom.parseRol(parsed);
+									if (rol != null) {
+										if (debugEnabled)
+											log.info(rol.toString());
+										return rol;
+									}
 								}
+							} finally {
+								pool.returnConnection();
 							}
 						}
 					}
@@ -1284,7 +1358,7 @@ public class CustomizableLDAPAgent extends Agent implements
 								
 								if ( keyAttribute == null) {
 									ExtensibleObject roleObject = parseEntry(
-											roleEntry, objectMapping);
+											conn, roleEntry, objectMapping);
 									ExtensibleObject soffidObject = objectTranslator
 											.parseInputObject(roleObject,
 													objectMapping);
@@ -1295,7 +1369,7 @@ public class CustomizableLDAPAgent extends Agent implements
 										roles.add(rol);
 									}
 								} else {
-									ExtensibleObject roleObject = parseEntry(roleEntry, objectMapping);
+									ExtensibleObject roleObject = parseEntry(conn, roleEntry, objectMapping);
 									String name = (String) objectTranslator.parseInputAttribute("name", roleObject, objectMapping);
 									if (debugEnabled || isDebug()) {
 										debugObject("Got ", roleObject, "");
@@ -1619,7 +1693,12 @@ public class CustomizableLDAPAgent extends Agent implements
 			for (int j = 0; j < v.length; j++) {
 				if (j > 0)
 					b.append(", ");
-				b.append(v[j]);
+				if (v[j] == null)
+					b.append("null");
+				else if (v[j].length() > 80)
+					b.append(v[j].substring(0, 80));
+				else
+					b.append(v[j]);
 			}
 			b.append("]");
 		}
@@ -2157,6 +2236,47 @@ public class CustomizableLDAPAgent extends Agent implements
 		if (entry == null)
 			return null;
 		return buildExtensibleObject(entry);
+	}
+
+	public void updateUserAlias(String useKey, Usuari user) throws InternalErrorException {
+	}
+
+	public void removeUserAlias(String userKey) throws InternalErrorException {
+	}
+
+	public void updateListAlias(LlistaCorreu llista) throws InternalErrorException {
+		MailListExtensibleObject sourceObject = new MailListExtensibleObject(llista, getServer());
+		ExtensibleObjects objects = objectTranslator
+				.generateObjects(sourceObject);
+		try {
+			updateObjects(null, objects, sourceObject);
+		} catch (InternalErrorException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new InternalErrorException("Unexpected exception", e);
+		}
+	}
+
+	public void removeListAlias(String nomLlista, String domini) throws InternalErrorException {
+		LlistaCorreu llista  =new LlistaCorreu();
+		llista.setNom(nomLlista);
+		llista.setCodiDomini(domini);
+		llista.setExplodedUsersList(new LinkedList<String>());
+		llista.setGroupMembers(new LinkedList<String>());
+		llista.setLlistaExterns(new LinkedList<String>());
+		llista.setLlistaLlistes(new LinkedList<String>());
+		llista.setLlistaUsuaris(new LinkedList<String>());
+		llista.setRoleMembers(new LinkedList<String>());
+		MailListExtensibleObject sourceObject = new MailListExtensibleObject(llista, getServer());
+		ExtensibleObjects objects = objectTranslator
+				.generateObjects(sourceObject);
+		try {
+			removeObjects(objects, sourceObject);
+		} catch (InternalErrorException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new InternalErrorException("Unexpected exception", e);
+		}
 	}
 
 }

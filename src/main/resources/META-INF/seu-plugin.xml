@@ -6,6 +6,12 @@
 	<name>LDAP plugin</name>
 	<version>${pom.version}</version>
 	<agent>
+		<name>Simple LDAP (Legacy)</name>
+		<javaClass>com.soffid.iam.sync.agent.LDAPAgent</javaClass>
+		<userInterface>LDAPAgent.zul</userInterface>
+		<enableAccessControl>false</enableAccessControl>
+	</agent>
+	<agent>
 		<name>LDAP</name>
 		<javaClass>com.soffid.iam.sync.agent.CustomizableLDAPAgent2</javaClass>
 		<javaClassV2>com.soffid.iam.sync.agent2.CustomizableLDAPAgent</javaClassV2>
