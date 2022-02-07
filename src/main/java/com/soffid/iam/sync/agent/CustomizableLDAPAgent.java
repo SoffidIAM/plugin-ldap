@@ -1424,11 +1424,14 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	public void updateUser(String accountName, String description)
 			throws RemoteException, InternalErrorException {
-		Account account = new Account();
-		account.setName(accountName);
-		account.setDescription(description);
-		account.setDisabled(false);
-		account.setDispatcher(getDispatcher().getCodi());
+		Account account = getServer().getAccountInfo(accountName, getCodi());
+		if (account == null) {
+			account = new Account();
+			account.setName(accountName);
+			account.setDescription(description);
+			account.setDisabled(true);
+			account.setDispatcher(getDispatcher().getCodi());			
+		}
 		AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
 				getServer());
 		ExtensibleObjects objects = objectTranslator
