@@ -2264,12 +2264,6 @@ public class CustomizableLDAPAgent extends Agent implements
 		LlistaCorreu llista  =new LlistaCorreu();
 		llista.setNom(nomLlista);
 		llista.setCodiDomini(domini);
-		llista.setExplodedUsersList(new LinkedList<String>());
-		llista.setGroupMembers(new LinkedList<String>());
-		llista.setLlistaExterns(new LinkedList<String>());
-		llista.setLlistaLlistes(new LinkedList<String>());
-		llista.setLlistaUsuaris(new LinkedList<String>());
-		llista.setRoleMembers(new LinkedList<String>());
 		MailListExtensibleObject sourceObject = new MailListExtensibleObject(llista, getServer());
 		ExtensibleObjects objects = objectTranslator
 				.generateObjects(sourceObject);
