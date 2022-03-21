@@ -1497,12 +1497,12 @@ public class CustomizableLDAPAgent extends Agent implements
 	public void updateUserPassword(String userName, Usuari userData,
 			Password password, boolean mustchange) throws RemoteException,
 			InternalErrorException {
-		Account account = new Account();
-		account.setName(userName);
-		account.setDescription(userData.getFullName());
-		account.setDisabled(false);
-		account.setDispatcher(getDispatcher().getCodi());
-		UserExtensibleObject sourceObject = new UserExtensibleObject(account, userData,
+		Account account = getServer().getAccountInfo(userName, getCodi());
+		if (account == null)
+			return;
+		ExtensibleObject sourceObject = userData == null? 
+				new AccountExtensibleObject(account, getServer()) :
+			new UserExtensibleObject(account, userData,
 				getServer());
 		ExtensibleObjects objects = objectTranslator
 				.generateObjects(sourceObject);
