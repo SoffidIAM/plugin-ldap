@@ -115,6 +115,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 		else
 			conn = new LDAPConnection();
 
+		conn.setSocketTimeOut(10000);
 		try 
 		{
 			LDAPConstraints constraints = conn.getConstraints();
