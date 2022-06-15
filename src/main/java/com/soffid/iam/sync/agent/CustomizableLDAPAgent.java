@@ -623,23 +623,20 @@ public class CustomizableLDAPAgent extends Agent implements
 		LDAPConnection conn = pool.getConnection();
 		try {
 			for (ExtensibleObject object : objects.getObjects()) {
-				String dn = vom.toString(object.getAttribute("dn"));
 				try {
-					if (dn != null) {
-						LDAPEntry entry = buscarUsuario(object);
-						if ( entry != null)
+					LDAPEntry entry = buscarUsuario(object);
+					if ( entry != null)
+					{
+						if (debugEnabled)
+							debugEntry("Object to remove", entry.getDN(), entry.getAttributeSet());
+						if (preDelete(soffidObject, entry))
 						{
-							if (debugEnabled)
-								debugEntry("Object to remove", entry.getDN(), entry.getAttributeSet());
-							if (preDelete(soffidObject, entry))
-							{
-								conn.delete(entry.getDN());
-								postDelete(soffidObject, entry);
-							} 
-						}
+							conn.delete(entry.getDN());
+							postDelete(soffidObject, entry);
+						} 
 					}
 				} catch (Exception e) {
-					String msg = "deleting object : " + dn;
+					String msg = "deleting object ";
 					log.warn(msg, e);
 					throw new InternalErrorException(msg, e);
 				}
@@ -984,6 +981,7 @@ public class CustomizableLDAPAgent extends Agent implements
 							while (searchResults.hasMore()) {
 								try {
 									LDAPEntry entry = searchResults.next();
+									log.info("Read object "+entry.getDN());
 									if (!start) {
 										if (entry.getDN().equals(first))
 											start = true;
@@ -995,8 +993,10 @@ public class CustomizableLDAPAgent extends Agent implements
 											break;
 									}
 								} catch (LDAPException e) {
-									if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+									if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT) {
+										log.warn("Got exception no such object", e);
 										break;
+									}
 									else
 										throw e;
 								}
@@ -1184,9 +1184,14 @@ public class CustomizableLDAPAgent extends Agent implements
 				ExtensibleObjects parsed = objectTranslator
 						.parseInputObjects(eo);
 				for (ExtensibleObject parsedObject : parsed.getObjects()) {
+					if (debugEnabled)
+						log.info("Read entry");
 					Rol rol = vom.parseRol(parsedObject);
-					if (rol != null)
+					if (rol != null) {
+						if (debugEnabled)
+							log.info("Read role "+rol.getNom());
 						roles.add(rol.getNom());
+					}
 				}
 
 			}
@@ -1845,13 +1850,23 @@ public class CustomizableLDAPAgent extends Agent implements
 			if (debugEnabled)
 				log.info("Fetching account "+userAccount+" from LDAP server");
 			ExtensibleObject eo = findExtensibleUser(userAccount);
-			if (eo == null)
+			if (eo == null) {
+				if (debugEnabled)
+					log.info("Cannot find account");
 				return null;
+			} else {
+				if (debugEnabled)
+					debugObject("Got LDAP object", eo, "   ");
+			}
 			ExtensibleObjects parsed = objectTranslator.parseInputObjects(eo);
 			for (ExtensibleObject peo : parsed.getObjects()) {
+				if (debugEnabled)
+					debugObject("Translated to Soffid object", peo, "   ");
 				Account usuari = vom.parseAccount(peo);
-				if (usuari != null)
+				if (usuari != null) {
+					if (debugEnabled) log.info("Soffid account: "+usuari.toString());
 					return usuari;
+				}
 			}
 			return null;
 		} catch (InternalErrorException e) {
