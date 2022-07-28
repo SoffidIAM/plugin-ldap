@@ -532,27 +532,7 @@ public class CustomizableLDAPAgent extends Agent implements
 														LDAPModification.REPLACE,
 														populateAttribute(attribute, value)));
 											else {
-												boolean update = false;
-												String[] oldvalue = entry
-														.getAttribute(attribute)
-														.getStringValueArray();
-												if (value.length != oldvalue.length)
-													update = true;
-												else {
-													for (int i = 0; i < value.length; i++) {
-														if (!value[i]
-																.equals(oldvalue[i])) {
-															update = true;
-															break;
-														}
-													}
-												}
-												if (update)
-													modList.add(new LDAPModification(
-															LDAPModification.REPLACE,
-															populateAttribute(
-																	attribute,
-																	value)));
+												updateAttribute(entry, attribute, value, modList);
 	
 											}
 										}
@@ -605,6 +585,86 @@ public class CustomizableLDAPAgent extends Agent implements
 		} finally {
 			pool.returnConnection();
 		}
+	}
+
+	private void updateAttribute(LDAPEntry entry, String attribute, Object[] value,
+			LinkedList<LDAPModification> modList) {
+		boolean update = false;
+		if (value.length < 10) {
+			String[] oldvalue = entry
+					.getAttribute(attribute)
+					.getStringValueArray();
+			if (value.length != oldvalue.length)
+				update = true;
+			else {
+				for (int i = 0; i < value.length; i++) {
+					if (!value[i]
+							.equals(oldvalue[i])) {
+						update = true;
+						break;
+					}
+				}
+			}
+			if (update)
+				modList.add(new LDAPModification(
+						LDAPModification.REPLACE,
+						populateAttribute(
+								attribute,
+								value)));
+		} else {
+			incrementalUpdateAttribute(entry, attribute, value, modList);
+		}
+	}
+
+	private void incrementalUpdateAttribute(LDAPEntry entry, String attribute, Object[] value,
+			LinkedList<LDAPModification> modList) {
+		List<Object> adds = new LinkedList<Object>();
+		List<Object> removes = new LinkedList<Object>();
+		Arrays.sort(value);
+		
+		if (debugEnabled) log.info("Computing delta changes for "+attribute);
+		String[] oldvalue = entry
+				.getAttribute(attribute)
+				.getStringValueArray();
+		Arrays.sort(oldvalue);
+		for ( int i = 0, j = 0; i < value.length || j < oldvalue.length; ) {
+			if (i < value.length && j < oldvalue.length) {
+				int c = oldvalue[j].compareTo(value[i].toString());
+				if ( c == 0 ) { // Skip both
+					i ++;
+					j ++;
+				}
+				else if (c < 0 ) { // oldvalue is lower
+					if (debugEnabled) log.info("To Remove "+oldvalue[j]);
+					removes.add(oldvalue[j++]);
+				} else { // oldvalue is greater
+					if (debugEnabled) log.info("To Add "+value[i]);
+					adds.add(value[i++]);
+				}
+			}
+			else if (i < value.length) {
+				if (debugEnabled) log.info("To Add "+value[i]);
+				adds.add(value[i++]);
+			}
+			else {
+				if (debugEnabled) log.info("To Remove "+oldvalue[j]);
+				removes.add(oldvalue[j++]);
+			}
+		}
+		if (removes.size() > 0) {
+			modList.add(new LDAPModification(
+					LDAPModification.DELETE,
+					populateAttribute(
+							attribute,
+							removes.toArray(new String[removes.size()]))));
+		} 
+		if (adds.size() > 0) {
+			modList.add(new LDAPModification(
+					LDAPModification.ADD,
+					populateAttribute(
+							attribute,
+							adds.toArray(new String[adds.size()]))));
+		} 
 	}
 
 	protected LDAPAttribute populateAttribute(String attribute, Object[] valuesObject) {
