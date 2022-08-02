@@ -40,7 +40,7 @@
 		</license>
 	</licenses>
   <scm>
-        <connection>scm:git:ssh://git@github.com/SoffidIAM/console.git</connection>
+        <connection>scm:git:ssh://git@github.com/SoffidIAM/plugin-ldap</connection>
         <tag>HEAD</tag>
   </scm>
 	<build>
