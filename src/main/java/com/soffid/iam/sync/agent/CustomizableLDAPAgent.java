@@ -559,7 +559,7 @@ public class CustomizableLDAPAgent extends Agent implements
 									}
 									if (rename) {
 										if (debugEnabled)
-											log.info("Renaminf from "+entry.getDN()+" to "+dn);
+											log.info("Renaming from "+entry.getDN()+" to "+dn);
 										int i = dn.indexOf(",");
 										if (i > 0) {
 											String parentName = dn.substring(i + 1);
