@@ -34,6 +34,7 @@ import com.novell.ldap.controls.LDAPPagedResultsControl;
 import com.novell.ldap.controls.LDAPPagedResultsResponse;
 import com.soffid.iam.api.Group;
 import com.soffid.iam.api.PasswordValidation;
+import com.soffid.iam.sync.intf.GroupMgr;
 
 import es.caib.seycon.ng.comu.Account;
 import es.caib.seycon.ng.comu.AccountType;
@@ -51,6 +52,7 @@ import es.caib.seycon.ng.exception.InternalErrorException;
 import es.caib.seycon.ng.exception.UnknownUserException;
 import es.caib.seycon.ng.sync.agent.Agent;
 import es.caib.seycon.ng.sync.engine.extobj.AccountExtensibleObject;
+import es.caib.seycon.ng.sync.engine.extobj.GroupExtensibleObject;
 import es.caib.seycon.ng.sync.engine.extobj.MailListExtensibleObject;
 import es.caib.seycon.ng.sync.engine.extobj.ObjectTranslator;
 import es.caib.seycon.ng.sync.engine.extobj.RoleExtensibleObject;
@@ -80,6 +82,7 @@ import es.caib.seycon.util.Base64;
 
 public class CustomizableLDAPAgent extends Agent implements
 		ExtensibleObjectMgr, UserMgr, ReconcileMgr2, RoleMgr,
+		GroupMgr,
 		MailAliasMgr,
 		AuthoritativeIdentitySource2 {
 	boolean ssl;
@@ -2340,6 +2343,35 @@ public class CustomizableLDAPAgent extends Agent implements
 		llista.setNom(nomLlista);
 		llista.setCodiDomini(domini);
 		MailListExtensibleObject sourceObject = new MailListExtensibleObject(llista, getServer());
+		ExtensibleObjects objects = objectTranslator
+				.generateObjects(sourceObject);
+		try {
+			removeObjects(objects, sourceObject);
+		} catch (InternalErrorException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new InternalErrorException("Unexpected exception", e);
+		}
+	}
+
+	public void updateGroup(Group grup) throws RemoteException, InternalErrorException {
+		GroupExtensibleObject sourceObject = new GroupExtensibleObject(Grup.toGrup(grup), getCodi(), getServer());
+		ExtensibleObjects objects = objectTranslator
+				.generateObjects(sourceObject);
+
+		try {
+			updateObjects(null, objects, sourceObject);
+		} catch (InternalErrorException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new InternalErrorException("Unexpected exception", e);
+		}
+	}
+
+	public void removeGroup(String key) throws RemoteException, InternalErrorException {
+		Grup grup = new Grup();
+		grup.setCodi(key);
+		GroupExtensibleObject sourceObject = new GroupExtensibleObject(grup, getCodi(), getServer());
 		ExtensibleObjects objects = objectTranslator
 				.generateObjects(sourceObject);
 		try {
