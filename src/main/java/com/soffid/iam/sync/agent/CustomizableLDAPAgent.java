@@ -7,6 +7,8 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,10 +19,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 
+import javax.management.Attribute;
+
 import com.novell.ldap.LDAPAttribute;
 import com.novell.ldap.LDAPAttributeSchema;
 import com.novell.ldap.LDAPAttributeSet;
 import com.novell.ldap.LDAPConnection;
+import com.novell.ldap.LDAPConstraints;
 import com.novell.ldap.LDAPControl;
 import com.novell.ldap.LDAPEntry;
 import com.novell.ldap.LDAPException;
@@ -85,6 +90,16 @@ public class CustomizableLDAPAgent extends Agent implements
 		GroupMgr,
 		MailAliasMgr,
 		AuthoritativeIdentitySource2 {
+	private final class CaseComparator implements Comparator {
+		@Override
+		public int compare(Object o1, Object o2) {
+			if (o1 == null && o2 == null) return 0;
+			if (o1 == null) return -1;
+			if (o2 == null) return +1;
+			return o1.toString().toLowerCase().compareTo(o2.toString().toLowerCase());
+		}
+	}
+
 	boolean ssl;
 	ValueObjectMapper vom = new ValueObjectMapper();
 
@@ -411,8 +426,8 @@ public class CustomizableLDAPAgent extends Agent implements
 	private Object[] toStringArray(Object obj) {
 		if (obj == null)
 			return null;
-		else if (obj instanceof List) {
-			return toStringArray(((List)obj).toArray());
+		else if (obj instanceof Collection) {
+			return toStringArray(((Collection)obj).toArray());
 		}
 		else if (obj instanceof String[]) {
 			return (String[]) obj;
@@ -448,150 +463,169 @@ public class CustomizableLDAPAgent extends Agent implements
 	 */
 	public void updateObjects(String accountName, ExtensibleObjects objects, ExtensibleObject soffidObject)
 			throws Exception {
-		LDAPConnection conn = pool.getConnection();
-		try {
-			for (ExtensibleObject obj : objects.getObjects()) {
-				String dn = vom.toString(obj.getAttribute("dn"));
-				try {
-					if (dn != null) {
-						log.info("Updating object {}", dn, null);
-						LDAPEntry entry = buscarUsuario(obj);
-						if (entry == null) {
-							if (debugEnabled) {
-								log.info("================================================");
-								debugObject("Creating object", obj, "  ");
+		for (ExtensibleObject obj : objects.getObjects()) {
+			String dn = vom.toString(obj.getAttribute("dn"));
+			try {
+				if (dn != null) {
+					log.info("Updating object {}", dn, null);
+					LDAPEntry entry = buscarUsuario(obj);
+					if (entry == null) {
+						if (debugEnabled) {
+							log.info("================================================");
+							debugObject("Creating object", obj, "  ");
+						} 
+						if (preInsert(soffidObject, obj))
+						{
+							LDAPAttributeSet attributeSet = new LDAPAttributeSet();
+							for (String attribute : obj.getAttributes()) {
+								Object[] valuesObject = toStringArray(obj.getAttribute(attribute));
+								if (valuesObject != null && !"dn".equals(attribute)) {
+									LDAPAttribute att;
+									att = populateAttribute(attribute, valuesObject);
+									attributeSet.add(att);
+									if (debugEnabled)
+										debugAttribute(LDAPModification.ADD,
+												att);
+								}
 							}
-							if (preInsert(soffidObject, obj))
-							{
-								LDAPAttributeSet attributeSet = new LDAPAttributeSet();
-								for (String attribute : obj.getAttributes()) {
-									Object[] valuesObject = toStringArray(obj.getAttribute(attribute));
-									if (valuesObject != null && !"dn".equals(attribute)) {
-										LDAPAttribute att;
-										att = populateAttribute(attribute, valuesObject);
-										attributeSet.add(att);
-										if (debugEnabled)
-											debugAttribute(LDAPModification.ADD,
-													att);
-									}
-								}
-								if (debugEnabled)
-									log.info("================================================");
-								int i = dn.indexOf(",");
-								if (i > 0) {
-									String parentName = dn.substring(i + 1);
-									createParents(parentName);
-								}
-								entry = new LDAPEntry(dn, attributeSet);
-								conn.add(entry);
-								if (accountName != null) {
-									Password p = getServer().getAccountPassword(
+							if (debugEnabled)
+								log.info("================================================");
+							int i = dn.indexOf(",");
+							if (i > 0) {
+								String parentName = dn.substring(i + 1);
+								createParents(parentName);
+							}
+							entry = new LDAPEntry(dn, attributeSet);
+							try {
+								pool.getConnection().add(entry);
+							} finally {
+								pool.returnConnection();
+
+							}
+							if (accountName != null) {
+								Password p = getServer().getAccountPassword(
+										accountName, getCodi());
+								if (p != null) {
+									updatePassword(accountName, objects, soffidObject, p,
+											false);
+								} else {
+									p = getServer().generateFakePassword(
 											accountName, getCodi());
-									if (p != null) {
+									if (p != null)
 										updatePassword(accountName, objects, soffidObject, p,
-												false);
-									} else {
-										p = getServer().generateFakePassword(
-												accountName, getCodi());
-										if (p != null)
-											updatePassword(accountName, objects, soffidObject, p,
-												true);
-									}
+											true);
 								}
-								postInsert(soffidObject, obj, entry);
 							}
-						} else {
-							if (debugEnabled) {
-								log.info("================================================");
-								debugObject("Updating object "+entry.getDN(), obj, "  ");
-							}
-							if (preUpdate(soffidObject, obj, entry))
-							{
-								LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
-								for (String attribute : obj.getAttributes()) {
-									if (!"dn".equals(attribute)
-											&& !"objectClass".equals(attribute)) {
-										Object v = obj.getAttribute(attribute);
-										Object[] value = toStringArray(obj.getAttribute(attribute));
-										if (value != null && 
-												(value instanceof String[]) &&
-												((String[])value).length == 1 &&
-												((String[])value)[0].trim().isEmpty())
-											value = null;
-										if (value == null
-												&& entry.getAttribute(attribute) != null) {
+							postInsert(soffidObject, obj, entry);
+						}
+					} else {
+						if (debugEnabled) {
+							log.info("================================================");
+							debugObject("Updating object "+entry.getDN(), obj, "  ");
+							log.info("================================================");
+							debugEntry("Current value ", entry.getDN(), entry.getAttributeSet());
+							log.info("================================================");
+						}
+						if (preUpdate(soffidObject, obj, entry))
+						{
+							LinkedList<LDAPModification> modList = new LinkedList<LDAPModification>();
+							for (String attribute : obj.getAttributes()) {
+								if (!"dn".equals(attribute)
+										&& !"objectClass".equals(attribute)) {
+									Object v = obj.getAttribute(attribute);
+									Object[] value = toStringArray(obj.getAttribute(attribute));
+									if (value != null && 
+											(value instanceof String[]) &&
+											((String[])value).length == 1 &&
+											((String[])value)[0].trim().isEmpty())
+										value = null;
+									if (value == null
+											&& entry.getAttribute(attribute) != null) {
+										modList.add(new LDAPModification(
+												LDAPModification.DELETE,
+												new LDAPAttribute(attribute)));
+									} else if (value != null
+											&& entry.getAttribute(attribute) == null) {
+										modList.add(new LDAPModification(
+												LDAPModification.ADD,
+												populateAttribute(attribute, value)));
+									} else if (value != null
+											&& entry.getAttribute(attribute) != null) {
+										if (v instanceof byte[][] )
 											modList.add(new LDAPModification(
-													LDAPModification.DELETE,
-													new LDAPAttribute(attribute)));
-										} else if (value != null
-												&& entry.getAttribute(attribute) == null) {
-											modList.add(new LDAPModification(
-													LDAPModification.ADD,
+													LDAPModification.REPLACE,
 													populateAttribute(attribute, value)));
-										} else if (value != null
-												&& entry.getAttribute(attribute) != null) {
-											if (v instanceof byte[][] )
-												modList.add(new LDAPModification(
-														LDAPModification.REPLACE,
-														populateAttribute(attribute, value)));
-											else {
-												updateAttribute(entry, attribute, value, modList);
-	
-											}
+										else {
+											updateAttribute(entry, attribute, value, modList);
 										}
 									}
 								}
-	
-								if (modList.size() > 0) {
-									LDAPModification[] mods = new LDAPModification[modList
-											.size()];
-									mods = new LDAPModification[modList.size()];
-									mods = (LDAPModification[]) modList
-											.toArray(mods);
-									debugModifications("Modifying", dn, mods);
-									conn.modify(entry.getDN(), mods);
+							}
+
+							if (modList.size() > 0) {
+								doModify(entry, modList);
+							}
+							if (!entry.getDN().equalsIgnoreCase(dn)) {
+								// Check if must rename
+								boolean rename = true;
+								ExtensibleObjectMapping mapping = getMapping(obj
+										.getObjectType());
+								if (mapping != null) {
+									rename = !"false".equalsIgnoreCase(mapping
+											.getProperties().get("rename"));
 								}
-								if (!entry.getDN().equalsIgnoreCase(dn)) {
-									// Check if must rename
-									boolean rename = true;
-									ExtensibleObjectMapping mapping = getMapping(obj
-											.getObjectType());
-									if (mapping != null) {
-										rename = !"false".equalsIgnoreCase(mapping
-												.getProperties().get("rename"));
-									}
-									if (rename) {
-										if (debugEnabled)
-											log.info("Renaming from "+entry.getDN()+" to "+dn);
-										int i = dn.indexOf(",");
-										if (i > 0) {
-											String parentName = dn.substring(i + 1);
-											createParents(parentName);
-	
-											entry = conn.read(entry.getDN());
+								if (rename) {
+									if (debugEnabled)
+										log.info("Renaming from "+entry.getDN()+" to "+dn);
+									int i = dn.indexOf(",");
+									if (i > 0) {
+										String parentName = dn.substring(i + 1);
+										createParents(parentName);
+
+										LDAPConnection conn = pool.getConnection();
+										try {
 											conn.rename(entry.getDN(),
 													dn.substring(0, i), parentName,
 													true);
+										} finally {
+											pool.returnConnection();
 										}
 									}
 								}
-								postUpdate(soffidObject, obj, entry);
 							}
+							postUpdate(soffidObject, obj, entry);
 						}
 					}
-				} catch (Exception e) {
-					String msg = "updating object : " + dn;
-					log.warn(msg, e);
-					throw new InternalErrorException(msg, e);
 				}
+			} catch (Exception e) {
+				String msg = "updating object : " + dn;
+				log.warn(msg, e);
+				throw new InternalErrorException(msg, e);
 			}
+		}
+	}
+
+	private void doModify(LDAPEntry entry, List<LDAPModification> modList)
+			throws Exception {
+		LDAPModification[] mods = new LDAPModification[modList
+				.size()];
+		mods = new LDAPModification[modList.size()];
+		mods = (LDAPModification[]) modList
+				.toArray(mods);
+		debugModifications("Modifying", entry.getDN(), mods);
+		LDAPConnection conn = pool.getConnection();
+		LDAPConstraints c = conn.getConstraints();
+		c.setTimeLimit(60000);
+		conn.setConstraints(c);
+		try {
+			conn.modify(entry.getDN(), mods);
 		} finally {
 			pool.returnConnection();
 		}
 	}
 
 	private void updateAttribute(LDAPEntry entry, String attribute, Object[] value,
-			LinkedList<LDAPModification> modList) {
+			LinkedList<LDAPModification> modList) throws Exception {
 		boolean update = false;
 		if (value.length < 10) {
 			String[] oldvalue = entry
@@ -608,7 +642,7 @@ public class CustomizableLDAPAgent extends Agent implements
 					}
 				}
 			}
-			if (update)
+			if (update) 
 				modList.add(new LDAPModification(
 						LDAPModification.REPLACE,
 						populateAttribute(
@@ -620,54 +654,73 @@ public class CustomizableLDAPAgent extends Agent implements
 	}
 
 	private void incrementalUpdateAttribute(LDAPEntry entry, String attribute, Object[] value,
-			LinkedList<LDAPModification> modList) {
+			LinkedList<LDAPModification> modList) throws Exception {
+		boolean nocase = attribute.equalsIgnoreCase("member") || attribute.equalsIgnoreCase("uniquemember");
 		List<Object> adds = new LinkedList<Object>();
 		List<Object> removes = new LinkedList<Object>();
-		Arrays.sort(value);
+		if (nocase) 
+			Arrays.sort(value, new CaseComparator());
+		else
+			Arrays.sort(value);
 		
 		if (debugEnabled) log.info("Computing delta changes for "+attribute);
 		String[] oldvalue = entry
 				.getAttribute(attribute)
 				.getStringValueArray();
-		Arrays.sort(oldvalue);
+		if (nocase) 
+			Arrays.sort(oldvalue, new CaseComparator());
+		else
+			Arrays.sort(oldvalue);
 		for ( int i = 0, j = 0; i < value.length || j < oldvalue.length; ) {
 			if (i < value.length && j < oldvalue.length) {
-				int c = oldvalue[j].compareTo(value[i].toString());
+				if (debugEnabled) log.info("Comparing OLD: "+oldvalue[j].toString());
+				if (debugEnabled) log.info("Comparing NEW: "+value[i].toString());
+				int c = nocase ? oldvalue[j].toString().toLowerCase().compareTo(value[i].toString().toLowerCase()) :
+						oldvalue[j].toString().compareTo(value[i].toString());
 				if ( c == 0 ) { // Skip both
 					i ++;
 					j ++;
+					if (debugEnabled) log.info("Keeping value");
 				}
 				else if (c < 0 ) { // oldvalue is lower
 					if (debugEnabled) log.info("To Remove "+oldvalue[j]);
-					removes.add(oldvalue[j++]);
+					removeValue(entry, attribute, oldvalue[j++]);
 				} else { // oldvalue is greater
 					if (debugEnabled) log.info("To Add "+value[i]);
-					adds.add(value[i++]);
+					addValue(entry, attribute, value[i++].toString());
 				}
 			}
 			else if (i < value.length) {
 				if (debugEnabled) log.info("To Add "+value[i]);
-				adds.add(value[i++]);
+				addValue(entry, attribute, value[i++].toString());
 			}
 			else {
 				if (debugEnabled) log.info("To Remove "+oldvalue[j]);
-				removes.add(oldvalue[j++]);
+				removeValue(entry, attribute, oldvalue[j++]);
 			}
 		}
-		if (removes.size() > 0) {
-			modList.add(new LDAPModification(
-					LDAPModification.DELETE,
-					populateAttribute(
-							attribute,
-							removes.toArray(new String[removes.size()]))));
-		} 
-		if (adds.size() > 0) {
-			modList.add(new LDAPModification(
-					LDAPModification.ADD,
-					populateAttribute(
-							attribute,
-							adds.toArray(new String[adds.size()]))));
-		} 
+	}
+
+	private void removeValue(LDAPEntry entry, String attribute, String value) throws Exception {
+		List<LDAPModification> l = Collections.singletonList(
+				new LDAPModification(LDAPModification.DELETE, new LDAPAttribute(attribute, value)) );
+		doModify(entry, l);
+	}
+
+	private void addValue(LDAPEntry entry, String attribute, String value) throws Exception {
+		List<LDAPModification> l = Collections.singletonList(
+				new LDAPModification(LDAPModification.ADD, new LDAPAttribute(attribute, value)) );
+		try {
+			doModify(entry, l);
+		} catch (LDAPException e) {
+			if (e.getResultCode() == LDAPException.ATTRIBUTE_OR_VALUE_EXISTS) {
+				// Ignore
+			}
+			else
+			{
+				throw e;
+			}
+		}
 	}
 
 	protected LDAPAttribute populateAttribute(String attribute, Object[] valuesObject) {
@@ -865,7 +918,7 @@ public class CustomizableLDAPAgent extends Agent implements
 						LDAPPagedResultsControl pageResult = null;
 						if (pagesize > 0)
 							pageResult = new LDAPPagedResultsControl(pagesize,
-									false);
+									true);
 
 						do {
 							LDAPSearchConstraints constraints = conn
@@ -874,11 +927,16 @@ public class CustomizableLDAPAgent extends Agent implements
 								constraints.setControls(pageResult);
 							constraints.setMaxResults(0);
 							conn.setConstraints(constraints);
+							conn.setSocketTimeOut(1200000); // Twenty minutes
+							String key = mapping.getProperties().get("key");
 
 							LDAPSearchResults searchResults = conn.search(
 									baseDN, LDAPConnection.SCOPE_SUB,
-									sb.toString(), null, false);
+									sb.toString(), key == null ? null: new String[] {key}, false);
 
+							log.info("Searching ");
+							if (pageResult != null)
+								log.info("Cookie: "+pageResult.getCookie());
 							// Process results
 							while (searchResults.hasMore()) {
 								try {
@@ -898,6 +956,9 @@ public class CustomizableLDAPAgent extends Agent implements
 								} catch (LDAPException e) {
 									if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
 										break;
+									else if (e.getResultCode() == LDAPException.UNWILLING_TO_PERFORM) {
+										log.warn("Error recopilando cuentas", e);
+									}
 									else
 										throw e;
 								}
@@ -916,8 +977,7 @@ public class CustomizableLDAPAgent extends Agent implements
 									for (int i = 0; i < responseControls.length; i++) {
 										if (responseControls[i] instanceof LDAPPagedResultsResponse) {
 											LDAPPagedResultsResponse response = (LDAPPagedResultsResponse) responseControls[i];
-											pageResult.setCookie(response
-													.getCookie());
+											pageResult.setCookie(response.getCookie());
 										}
 									}
 								}

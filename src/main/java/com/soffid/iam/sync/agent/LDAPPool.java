@@ -162,7 +162,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 
 	@Override
 	protected void closeConnection(LDAPConnection connection) throws Exception {
-		connection.clone();
+		connection.disconnect();
 	}
 
 }

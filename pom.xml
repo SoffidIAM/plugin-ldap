@@ -47,6 +47,14 @@
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<source>1.8</source>
+					<target>1.8</target>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-shade-plugin</artifactId>
 				<version>1.2</version>
 				<executions>
@@ -81,8 +89,8 @@
 		</plugins>
 	</build>
 	<properties>
-		<maven.compile.source>5</maven.compile.source>
-		<maven.compile.target>5</maven.compile.target>
+		<maven.compile.source>1.8</maven.compile.source>
+		<maven.compile.target>1.8</maven.compile.target>
 	</properties>
 	<pluginRepositories>
 		<pluginRepository>
