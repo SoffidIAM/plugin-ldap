@@ -1,6 +1,7 @@
 package com.soffid.iam.sync.agent;
 
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Array;
 import java.rmi.RemoteException;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
@@ -916,23 +917,28 @@ public class CustomizableLDAPAgent extends Agent implements
 								.getSearchConstraints(); // Save search
 															// constraints
 						LDAPPagedResultsControl pageResult = null;
-						if (pagesize > 0)
+						if (pagesize > 0) {
+							log.info("Page size = "+pagesize);
 							pageResult = new LDAPPagedResultsControl(pagesize,
-									true);
+									false);
+						}
 
 						do {
 							LDAPSearchConstraints constraints = conn
 									.getSearchConstraints();
-							if (pageResult != null)
+							if (pageResult != null) {
+								log.info("Setting pageResult cooking "+pageResult.getCookie());
 								constraints.setControls(pageResult);
+							}
 							constraints.setMaxResults(0);
-							conn.setConstraints(constraints);
+//							conn.setConstraints(constraints);
 							conn.setSocketTimeOut(1200000); // Twenty minutes
 							String key = mapping.getProperties().get("key");
 
 							LDAPSearchResults searchResults = conn.search(
 									baseDN, LDAPConnection.SCOPE_SUB,
-									sb.toString(), key == null ? null: new String[] {key}, false);
+									sb.toString(), key == null ? null: new String[] {key}, false,
+									constraints);
 
 							log.info("Searching ");
 							if (pageResult != null)
@@ -977,14 +983,17 @@ public class CustomizableLDAPAgent extends Agent implements
 									for (int i = 0; i < responseControls.length; i++) {
 										if (responseControls[i] instanceof LDAPPagedResultsResponse) {
 											LDAPPagedResultsResponse response = (LDAPPagedResultsResponse) responseControls[i];
+											log.info("Got result cookie "+response.getCookie());
 											pageResult.setCookie(response.getCookie());
 										}
 									}
 								}
 							}
 						} while (pageResult != null
-								&& pageResult.getCookie() != null);
-						conn.setConstraints(oldConst);
+								&& pageResult.getCookie() != null 
+								&& pagesize > 0);
+						conn.getSearchConstraints().setControls(
+								new LDAPControl[0]);
 					}
 				}
 			}
@@ -1091,14 +1100,15 @@ public class CustomizableLDAPAgent extends Agent implements
 							if (pageResult != null)
 								constraints.setControls(pageResult);
 							constraints.setMaxResults(0);
-							lc.setConstraints(constraints);
+//							lc.setConstraints(constraints);
 
 							log.debug("Searching for " + sb.toString() + " on "
 									+ baseDN);
 
 							LDAPSearchResults searchResults = lc.search(baseDN,
 									LDAPConnection.SCOPE_SUB, sb.toString(),
-									null, false);
+									null, false,
+									constraints);
 
 							// Process results
 							while (searchResults.hasMore()) {
@@ -1178,9 +1188,17 @@ public class CustomizableLDAPAgent extends Agent implements
 	};
 	protected boolean isBinary(LDAPConnection conn, String attributeName) throws LDAPException {
 		if (schema == null) {
-			String c = conn.getSchemaDN();
-			schema = conn.fetchSchema(c);
+			try {
+				String c = conn.getSchemaDN();
+				if (c == null)
+					return false;
+				schema = conn.fetchSchema(c);
+			} catch (Exception e) {
+				return false;
+			}
 		}
+		if (schema == null)
+			return false;
 		LDAPAttributeSchema p = schema.getAttributeSchema(attributeName);
 		if (p == null)
 			return false;
@@ -1645,45 +1663,44 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	public boolean validateUserPassword(String user, Password password)
 			throws RemoteException, InternalErrorException {
-		LDAPConnection conn = null;
+		Account acc = new Account();
+		acc.setName(user);
+		acc.setDescription(user);
+		acc.setDispatcher(getDispatcher().getCodi());
+		ExtensibleObjects entries;
 		try {
-			Account acc = new Account();
-			acc.setName(user);
-			acc.setDescription(user);
-			acc.setDispatcher(getDispatcher().getCodi());
-			ExtensibleObjects entries;
-			try {
-				Usuari usuari = getServer().getUserInfo(user,
-						getDispatcher().getCodi());
-				entries = objectTranslator
-						.generateObjects(new UserExtensibleObject(acc, usuari,
-								getServer()));
-			} catch (UnknownUserException e) {
-				entries = objectTranslator
-						.generateObjects(new AccountExtensibleObject(acc,
-								getServer()));
-			}
-			for (ExtensibleObject entry : entries.getObjects()) {
-				try {
-					String dn = vom.toSingleString(entry.getAttribute("dn"));
-					if (dn != null) {
-						conn = new LDAPConnection();
-						conn.connect(ldapHost, ldapPort);
-						conn.bind(ldapVersion, dn, password.getPassword()
-								.getBytes("UTF8"));
-						conn.disconnect();
-						return true;
-					}
-				} catch (LDAPException e) {
-					log.info("Error connecting as user " + user + ":"
-							+ e.toString());
-				}
-			}
-			return false;
-		} catch (UnsupportedEncodingException e) {
-			return false;
-		} finally {
+			Usuari usuari = getServer().getUserInfo(user,
+					getDispatcher().getCodi());
+			entries = objectTranslator
+					.generateObjects(new UserExtensibleObject(acc, usuari,
+							getServer()));
+		} catch (UnknownUserException e) {
+			entries = objectTranslator
+					.generateObjects(new AccountExtensibleObject(acc,
+							getServer()));
 		}
+		for (ExtensibleObject entry : entries.getObjects()) {
+			try {
+				LDAPEntry ldapEntry = buscarUsuario(entry);
+				String dn = ldapEntry == null ? 
+						vom.toSingleString(entry.getAttribute("dn")) :
+					ldapEntry.getDN();
+				if (dn != null) {
+					LDAPConnection conn2 = new LDAPConnection();
+					conn2.connect(ldapHost, ldapPort);
+					if (debugEnabled)
+						log.info("Connecting to "+ldapHost+":"+ldapPort+" with DN "+dn);
+					conn2.bind(ldapVersion, dn, password.getPassword()
+							.getBytes("UTF8"));
+					conn2.disconnect();
+					return true;
+				}
+			} catch (Exception e) {
+				log.info("Error connecting as user " + user + ":"
+						+ e.toString());
+			}
+		}
+		return false;
 	}
 
 	public void updateRole(Rol rol) throws RemoteException,
@@ -1781,9 +1798,19 @@ public class CustomizableLDAPAgent extends Agent implements
 							Map<String, Object> attributesMap = new HashMap<String, Object>();
 							for (Object attributeName : ((Map) attributes)
 									.keySet()) {
-								attributesMap.put((String) attributeName, vom
-										.toSingleton(((Map) attributes)
-												.get(attributeName)));
+								Object obj = ((Map) attributes)
+												.get(attributeName);
+								if (obj != null) {
+									if (obj instanceof Collection &&
+											((Collection) obj).size() > 1)
+										attributesMap.put((String) attributeName, obj);
+									if (obj.getClass().isArray() && 
+											Array.getLength(obj) > 1)
+										attributesMap.put((String) attributeName, obj);
+									else
+										attributesMap.put((String) attributeName, vom
+											.toSingleton(obj));
+								}
 							}
 							change.setAttributes(attributesMap);
 						}
