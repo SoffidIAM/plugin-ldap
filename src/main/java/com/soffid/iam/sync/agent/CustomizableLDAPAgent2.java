@@ -86,6 +86,12 @@ public class CustomizableLDAPAgent2 extends
 	}
 
 	@Override
+	protected boolean prePassword(ExtensibleObject soffidObject,
+			ExtensibleObject adObject, LDAPEntry currentEntry) throws InternalErrorException {
+		return runTrigger(SoffidObjectTrigger.PRE_SET_PASSWORD, soffidObject, null, currentEntry);
+	}
+
+	@Override
 	protected boolean postUpdate(ExtensibleObject soffidObject,
 			ExtensibleObject adObject, LDAPEntry currentEntry)
 			throws InternalErrorException {
@@ -103,5 +109,12 @@ public class CustomizableLDAPAgent2 extends
 	protected boolean postDelete(ExtensibleObject soffidObject,
 			LDAPEntry currentEntry) throws InternalErrorException {
 		return runTrigger(SoffidObjectTrigger.POST_DELETE, soffidObject,  null, currentEntry);
+	}
+
+	@Override
+	protected boolean postPassword(ExtensibleObject soffidObject,
+			ExtensibleObject adObject, LDAPEntry currentEntry)
+			throws InternalErrorException {
+		return runTrigger(SoffidObjectTrigger.POST_SET_PASSWORD, soffidObject, adObject, currentEntry);
 	}
 }
