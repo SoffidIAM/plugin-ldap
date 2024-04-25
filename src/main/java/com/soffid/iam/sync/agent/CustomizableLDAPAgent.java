@@ -39,6 +39,7 @@ import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
 import com.novell.ldap.controls.LDAPPagedResultsResponse;
 import com.soffid.iam.api.Group;
+import com.soffid.iam.api.HostService;
 import com.soffid.iam.api.PasswordValidation;
 import com.soffid.iam.sync.intf.GroupMgr;
 
@@ -271,7 +272,7 @@ public class CustomizableLDAPAgent extends Agent implements
 							mods = new LDAPModification[modList.size()];
 							mods = (LDAPModification[]) modList.toArray(mods);
 							debugModifications("Modifying password ", ldapUser.getDN(), mods);
-							if (preUpdate(soffidObject, object , ldapUser)) {
+							if (prePassword(soffidObject, object, ldapUser)) {
 								try {
 									pool.getConnection().modify(dn, mods);
 								} finally {
@@ -280,7 +281,7 @@ public class CustomizableLDAPAgent extends Agent implements
 								log.info(
 										"UpdateUserPassword - setting password for user {}",
 										dn, null);
-								postUpdate(soffidObject, object, ldapUser);
+								postPassword(soffidObject, object, ldapUser);
 							}
 						}
 						return;
@@ -1957,6 +1958,12 @@ public class CustomizableLDAPAgent extends Agent implements
 		return true;
 	}
 
+	protected boolean postPassword(ExtensibleObject soffidObject,
+			ExtensibleObject adObject, LDAPEntry currentEntry)
+			throws InternalErrorException {
+		return true;
+	}
+
 	protected boolean preDelete(ExtensibleObject soffiObject,
 			LDAPEntry currentEntry) throws InternalErrorException {
 		return true;
@@ -1968,6 +1975,12 @@ public class CustomizableLDAPAgent extends Agent implements
 	}
 
 	protected boolean preUpdate(ExtensibleObject soffidObject,
+			ExtensibleObject adObject, LDAPEntry currentEntry)
+			throws InternalErrorException {
+		return true;
+	}
+
+	protected boolean prePassword(ExtensibleObject soffidObject,
 			ExtensibleObject adObject, LDAPEntry currentEntry)
 			throws InternalErrorException {
 		return true;
@@ -2470,4 +2483,16 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 	}
 
+	  public void updateExtensibleObject (ExtensibleObject obj) throws RemoteException, InternalErrorException {
+		  //Nothing
+	  }
+
+	  public void removeExtensibleObject (ExtensibleObject obj) throws RemoteException, InternalErrorException {
+		  //Nothing
+	  }
+
+	  public List<HostService> getHostServices() throws RemoteException, InternalErrorException {
+		  // Nothing
+		  return null;
+	  }
 }
