@@ -25,8 +25,8 @@ cache:
   script:
     - 'base64 -d $KEYSTORE_JKS >/tmp/keystore.p12'
     - 'mvn $MAVEN_CLI_OPTS install'
-  if:
-    - $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Verify merge requests using JDK8
 verify:jdk8:
