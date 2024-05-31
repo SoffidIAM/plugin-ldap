@@ -4,90 +4,76 @@
 <?component name="input_etiqueta" macro-uri="comu/input_etiqueta.zul"?>
 <?component name="input_password" macro-uri="comu/input_password.zul"?>
 
-<grid width="99%">
-	<columns visible="false"><column width="14%"/><column/> </columns>
-	<rows>
-		<row>
-			<input_etiqueta value="User name" />
-			<hbox width="90%">
-				<input_dada bind="@param0" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="Password" />
-			<hbox width="90%">
-				<input_password bind="@param1" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="Host name" />
-			<hbox width="90%">
-				<input_dada bind="@param2" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="Enable SSL" />
-			<listbox bind="@param9" mold="select"  disabled="{!canModifyAgent}" width="100px">
-				<listitem value="false">
-					<listcell label="No"/>
-				</listitem>
-				<listitem value="true">
-					<listcell label="Yes"/>
-				</listitem>
-			</listbox>
-		</row>
-		<row>
-			<input_etiqueta value="Base DN" />
-			<hbox width="90%">
-				<input_dada bind="@param7" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="PasswordAttribute" />
-			<vbox width="90%">
-				<input_dada bind="@param3" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-				<label value="e.g. userPassword"/>
-			</vbox>
-		</row>
-		<row>
-			<input_etiqueta value="Password hash algorightm" />
-			<vbox width="90%">
-				<input_dada bind="@param4" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-				<label value="e.g. SHA"/>
-			</vbox>
-		</row>
-		<row>
-			<input_etiqueta value="Password hash prefix" />
-			<hbox width="90%">
-				<input_dada bind="@param5" lectura="${!canModifyAgent}"
-					width_custom="98%" />
-				<label value="e.g. {SHA}"/>
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="LDAP Query page size" />
-			<hbox width="90%">
-				<input_dada bind="@param6" lectura="${!canModifyAgent}"
-					width_custom="50%" />
-				<label value="(-1 to disable)"/>
-			</hbox>
-		</row>
-		<row>
-			<input_etiqueta value="Enable debug" />
-			<listbox bind="@param8" mold="select"  disabled="{!canModifyAgent}" width="100px">
-				<listitem value="false">
-					<listcell label="No"/>
-				</listitem>
-				<listitem value="true">
-					<listcell label="Yes"/>
-				</listitem>
-			</listbox>
-		</row>
-	</rows>
-</grid>
+<zk>
+	<zscript><![CDATA[
+		String[] attributes = new String[] {
+				"grantStrategy"
+		};
+		void updateBlob () {
+			String t = "";
+			for ( String attribute: attributes)
+			{
+				Component item = configurationGrid.getFellow (attribute);
+				Object v = item.getValue();
+				if ( v != null)
+				{
+					if (!t.isEmpty()) t = t + "&";
+					t = t + 
+						java.net.URLEncoder.encode(attribute, "UTF-8") + "=" + 
+						java.net.URLEncoder.encode( v.toString(), "UTF-8");
+				}
+			}
+			es.caib.zkib.datasource.XPathUtils.setValue(configurationGrid,"blobParam", t.getBytes("UTF-8"));
+		}
+		void loadBlob () {
+		    try {
+				byte[] data = es.caib.zkib.datasource.XPathUtils.getValue(configurationGrid, "blobParam");
+				if (data != null)
+				{
+					String t = new String ( data,"UTF-8"); 
+					Map m = new HashMap();
+					if (t != null)
+					{
+						for (String tag: t.split("&")) {
+							int i = tag.indexOf("=");
+							String attribute = java.net.URLDecoder.decode(tag.substring(0, i), "UTF-8");
+							Component c = configurationGrid.getFellowIfAny (attribute);
+							if (c != null)
+							{
+								String v = i > 0 ? java.net.URLDecoder.decode(tag.substring(i+1), "UTF-8"): null;
+								if (c instanceof Listbox)
+								{
+									c.setSelectedItem(null);
+									for ( item: c.getItems()) {
+										if (item.getValue() != null && item.getValue().equals(v))
+											c.setSelectedItem ( item );
+									}
+								}
+								else
+									c.setValue ( v );
+	
+							}
+						}
+					}
+				}
+		    } catch (Exception e) {
+		    	e.printStackTrace();
+		    }
+		}
+	]]>
+	</zscript>
+	<div width="100%" onCreate="loadBlob()" id="configurationGrid">
+		<customfield3 label="User name" bind="@param0" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Password" bind="@param1" readonly="${!canModifyAgent}" dataType="PASSWORD"/>
+		<customfield3 label="Host name" bind="@param2" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Enable SSL" bind="@param9" readonly="${!canModifyAgent}" dataType="BOOLEAN"/>
+		<customfield3 label="Base DN" bind="@param7" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Password attribute" placeholder="userPassword" bind="@param3" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Password hash algorithm" placeholder="None" bind="@param4" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Password hash prefix" placeholder="None" bind="@param5" readonly="${!canModifyAgent}" dataType="STRING"/>
+		<customfield3 label="Query page size" placeholder="None" bind="@param6" readonly="${!canModifyAgent}" dataType="NUMBER"/>
+		<customfield3 label="Debug" placeholder="None" bind="@param8" readonly="${!canModifyAgent}" dataType="BOOLEAN"/>
+		<customfield3 label="Smart group membership" placeholder="None" readonly="${!canModifyAgent}" dataType="BOOLEAN" 
+			id="grantStrategy" onChange="updateBlob()"/>
+	</div>
+</zk>

@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,6 +57,7 @@ import es.caib.seycon.ng.comu.RolGrant;
 import es.caib.seycon.ng.comu.SoffidObjectType;
 import es.caib.seycon.ng.comu.Usuari;
 import es.caib.seycon.ng.exception.InternalErrorException;
+import es.caib.seycon.ng.exception.UnknownRoleException;
 import es.caib.seycon.ng.exception.UnknownUserException;
 import es.caib.seycon.ng.sync.agent.Agent;
 import es.caib.seycon.ng.sync.engine.extobj.AccountExtensibleObject;
@@ -162,6 +164,8 @@ public class CustomizableLDAPAgent extends Agent implements
 	static HashMap<String, LDAPPool> pools = new HashMap<String, LDAPPool>();
 
 	protected LDAPPool pool;
+	private HashMap<String, String> extendedAttributes = new HashMap<>();
+	private boolean smartGrant;
 
 	@Override
 	public void init() throws InternalErrorException {
@@ -180,7 +184,7 @@ public class CustomizableLDAPAgent extends Agent implements
 			ldapPort = ssl ? LDAPConnection.DEFAULT_SSL_PORT: LDAPConnection.DEFAULT_PORT; 
 		}
 		passwordAttribute = getDispatcher().getParam3();
-		if (passwordAttribute == null)
+		if (passwordAttribute == null || passwordAttribute.trim().isEmpty())
 			passwordAttribute = "userPassword";
 		hashType = getDispatcher().getParam4();
 		if (hashType == null)
@@ -210,6 +214,32 @@ public class CustomizableLDAPAgent extends Agent implements
 					"Unable to use SHA encryption algorithm ", e);
 		}
 
+		byte[] data = getDispatcher().getBlobParam();
+		if (data != null)
+		{
+			String t;
+			try {
+				t = new String ( data,"UTF-8");
+				if (t != null)
+				{
+					for (String tag: t.split("&")) {
+						int p = tag.indexOf("=");
+						String attribute;
+						String v;
+						try {
+							attribute = p < 0 ? tag: java.net.URLDecoder.decode(tag.substring(0, p), "UTF-8");
+							v = p > 0 ? java.net.URLDecoder.decode(tag.substring(p+1), "UTF-8"): null;
+							extendedAttributes .put(attribute, v);
+						} catch (UnsupportedEncodingException e) {
+						}
+					}
+				}
+			} catch (UnsupportedEncodingException e1) {
+			} 
+		}
+
+		smartGrant = "true".equals(extendedAttributes.get("grantStrategy"));
+		
 		pool = pools.get(getCodi());
 		if (pool == null) {
 			pool = new LDAPPool();
@@ -222,6 +252,13 @@ public class CustomizableLDAPAgent extends Agent implements
 		pool.setLdapVersion(ldapVersion);
 		pool.setLoginDN(loginDN);
 		pool.setPassword(password);
+		
+		try {
+			pool.getConnection();
+		} catch (Exception e) {
+			throw new InternalErrorException("Error connecting to "+ldapHost+":"+ldapPort, e);
+		}
+		pool.returnConnection();
 	}
 
 	/**
@@ -390,13 +427,14 @@ public class CustomizableLDAPAgent extends Agent implements
 				return null;
 			}
 		} catch (LDAPException e) {
-			if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT)
+			if (e.getResultCode() == LDAPException.NO_SUCH_OBJECT ||
+					e.getResultCode() == LDAPException.INVALID_DN_SYNTAX)
 				return null;
 			String msg = "buscarUsuario ('" + dn
 					+ "'). Error al buscar el usuario. [" + e.getMessage()
 					+ "]";
 			log.warn(msg, e);
-			throw new InternalErrorException(msg, e);
+			throw e;
 		} finally {
 			pool.returnConnection();
 		}
@@ -472,6 +510,18 @@ public class CustomizableLDAPAgent extends Agent implements
 					log.info("Updating object {}", dn, null);
 					LDAPEntry entry = buscarUsuario(obj);
 					if (entry == null) {
+						Object objectClass = obj.getAttribute("objectClass");
+						if (objectClass != null) {
+							if (objectClass.toString().toLowerCase().contains("groupofuniquenames") && 
+									obj.getAttribute("uniqueMember") == null)
+								obj.put("uniqueMember", "cn=nobody,"+baseDN);
+							if (objectClass.toString().toLowerCase().contains("groupofnames") && 
+									obj.getAttribute("member") == null)
+								obj.put("member", "cn=nobody,"+baseDN);
+							if (objectClass.toString().toLowerCase().contains("posixgroup") && 
+									obj.getAttribute("memberUid") == null) 
+								obj.put("memberuid", "-1");
+						}
 						if (debugEnabled) {
 							log.info("================================================");
 							debugObject("Creating object", obj, "  ");
@@ -628,6 +678,12 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	private void updateAttribute(LDAPEntry entry, String attribute, Object[] value,
 			LinkedList<LDAPModification> modList) throws Exception {
+		if (smartGrant && 
+				("member".equals(attribute) || 
+				 "uniqueMember".equals(attribute) ||
+				 "memberUid".equalsIgnoreCase(attribute))) {
+			return; // Ignore changes to these attributes
+		}
 		boolean update = false;
 		if (value.length < 10) {
 			String[] oldvalue = entry
@@ -753,6 +809,10 @@ public class CustomizableLDAPAgent extends Agent implements
 							postDelete(soffidObject, entry);
 						} 
 					}
+				} catch (LDAPException e) {
+					String msg = "deleting object ";
+					log.warn(msg, e);
+					throw new InternalErrorException(msg, e);
 				} catch (Exception e) {
 					String msg = "deleting object ";
 					log.warn(msg, e);
@@ -1562,6 +1622,8 @@ public class CustomizableLDAPAgent extends Agent implements
 				.generateObjects(sourceObject);
 		try {
 			updateObjects(userName, objects, sourceObject);
+			if (smartGrant)
+				updateGrants(objects, getServer().getAccountRoles(userName, getDispatcher().getCodi()));
 		} catch (InternalErrorException e) {
 			throw e;
 		} catch (Exception e) {
@@ -1585,11 +1647,168 @@ public class CustomizableLDAPAgent extends Agent implements
 				.generateObjects(sourceObject);
 		try {
 			updateObjects(accountName, objects, sourceObject);
+			if (smartGrant)
+				updateGrants(objects, getServer().getAccountRoles(accountName, getDispatcher().getCodi()));
 		} catch (InternalErrorException e) {
 			throw e;
 		} catch (Exception e) {
 			throw new InternalErrorException("Unexpected exception", e);
 		}
+	}
+
+	private void updateGrants(ExtensibleObjects objects, Collection<RolGrant> accountRoles) throws InternalErrorException {
+		for (ExtensibleObjectMapping m: findGroupType("groupOfNames")) {
+			updateGrants(objects, accountRoles, m, "groupOfNames", "member", "dn");
+		}
+		for (ExtensibleObjectMapping m: findGroupType("groupOfUniqueNames")) {
+			updateGrants(objects, accountRoles, m, "groupOfUniqueNames", "uniqueMember", "dn");
+		}
+		for (ExtensibleObjectMapping m: findGroupType("posixGroup")) {
+			updateGrants(objects, accountRoles, m, "posixGroup", "memberUid", "uid");
+		}
+	}
+
+	private void updateGrants(ExtensibleObjects objects, Collection<RolGrant> accountRoles, ExtensibleObjectMapping m,
+			String groupType, String groupAttribute, String userAttribute) throws InternalErrorException {
+		// Compute list of grants to add
+		HashSet<String> groups = new HashSet<>();
+		for (RolGrant grant: accountRoles) {
+			try {
+				Rol r = getServer().getRoleInfo(grant.getRolName(), getDispatcher().getCodi());
+				Object dn = objectTranslator.generateAttribute("dn", new RoleExtensibleObject(r, getServer()), m);
+				if (dn != null) groups.add(dn.toString().toLowerCase());
+			} catch (UnknownRoleException e) {
+			}
+		}
+		for (ExtensibleObject obj: objects.getObjects()) {
+			Object value = obj.get(userAttribute);
+			if (value != null) {
+				HashSet<String> groups2 = new HashSet<>(groups);
+				// Fetch currently assigned grants
+				try {
+					LDAPConnection conn = pool.getConnection();
+					try
+					{
+						removeGroups(conn, groupAttribute, userAttribute, value, groups, groups2);
+
+						for (String groupDN: groups2) {
+							addGroup(conn, groupDN, groupAttribute, value);
+						}
+					} finally {
+						pool.returnConnection();
+					}
+					
+				} catch (Exception e1) {
+					throw new InternalErrorException ("Error performing LDAP query", e1);
+				}
+			}
+		}
+	}
+
+	private void addGroup(LDAPConnection conn, String groupDN, String groupAttribute, Object value) throws InternalErrorException, LDAPException {
+		LDAPEntry entry = null;
+		try {
+			entry = conn.read(groupDN, new String[] {groupAttribute});
+		} catch (LDAPException e) {
+			if (e.getResultCode() != LDAPException.NO_SUCH_OBJECT)
+				throw e;
+		}
+		if (entry == null) 
+			throw new InternalErrorException("Group "+groupDN+" does not exist");
+		if (debugEnabled) {
+			log.info("Adding member "+value.toString()+" to "+groupDN);
+		}
+		LDAPAttribute att = entry.getAttribute(groupAttribute);
+		Enumeration values = att.getStringValues();
+		String v = (String) values.nextElement();
+		LDAPModification m;
+		if (!values.hasMoreElements() && (
+				(v.equalsIgnoreCase("cn=nobody,"+baseDN) && groupAttribute.equalsIgnoreCase("member"))
+			||  (v.equalsIgnoreCase("cn=nobody,"+baseDN) && groupAttribute.equalsIgnoreCase("uniqueMember"))
+			||  (v.equalsIgnoreCase("-1") && groupAttribute.equalsIgnoreCase("memberUid"))))
+			m = new LDAPModification(LDAPModification.REPLACE, new LDAPAttribute(groupAttribute, value.toString()));
+		else
+			m = new LDAPModification(LDAPModification.ADD, new LDAPAttribute(groupAttribute, value.toString()));
+		conn.modify(entry.getDN(), m);
+	}
+
+	protected void removeGroups(LDAPConnection conn, String groupAttribute, String userAttribute, Object value,
+			HashSet<String> groups, HashSet groups2) throws LDAPException {
+		String queryString = "("+groupAttribute+"="+escapeLDAPSearchFilter(value.toString())+")";
+		LDAPPagedResultsControl pageResult = null;
+		if (pagesize > 0) {
+			pageResult  = new LDAPPagedResultsControl(pagesize, false);
+		}
+
+		do {
+			LDAPSearchConstraints constraints = conn.getSearchConstraints();
+			if (pageResult != null) {
+				constraints.setControls(pageResult);
+			}
+			constraints.setMaxResults(0);
+
+			LDAPSearchResults query = conn.search(baseDN,
+					LDAPConnection.SCOPE_SUB, queryString, new String[] {groupAttribute}, false,
+							constraints);
+			while (query.hasMore()) {
+				try {
+					LDAPEntry entry = query.next();
+					if (! groups.contains(entry.getDN().toLowerCase()))
+						removeEntry(conn, entry, groupAttribute, value.toString());
+					else
+						groups2.remove(entry.getDN().toLowerCase());
+				} 
+				catch (LDAPReferralException e)
+				{
+				}
+			}			
+			if (pageResult != null) {
+				LDAPControl responseControls[] = query.getResponseControls();
+				pageResult.setCookie(null); 
+				if (responseControls != null) {
+					for (int i = 0; i < responseControls.length; i++) {
+						if (responseControls[i] instanceof LDAPPagedResultsResponse) {
+							LDAPPagedResultsResponse response = (LDAPPagedResultsResponse) responseControls[i];
+							pageResult.setCookie(response.getCookie());
+						}
+					}
+				}
+			}
+		} while (pageResult != null 
+				&& pageResult.getCookie() != null 
+				&& pagesize > 0);
+	}
+
+	private void removeEntry(LDAPConnection conn, LDAPEntry entry, String groupAttribute, String value) throws LDAPException {
+		if (debugEnabled) {
+			log.info("Removing member "+value.toString()+" from "+entry);
+		}
+		Enumeration values = entry.getAttribute(groupAttribute).getStringValues();
+		boolean empty = false;
+		if (!values.hasMoreElements()) empty = true;
+		else {
+			values.nextElement();
+			if (!values.hasMoreElements()) empty = true;
+		}
+		LDAPModification m = empty ?
+			new LDAPModification(LDAPModification.REPLACE, new LDAPAttribute(groupAttribute, 
+					groupAttribute.equalsIgnoreCase("memberUid") ? "-1": "cn=nobody,"+baseDN)) :
+			new LDAPModification(LDAPModification.DELETE, new LDAPAttribute(groupAttribute, value));
+		conn.modify(entry.getDN(), m);
+	}
+
+	private List<ExtensibleObjectMapping> findGroupType(String desiredType) throws InternalErrorException {
+		List<ExtensibleObjectMapping> r = new LinkedList<>();
+		nextMapping: for (ExtensibleObjectMapping m: objectTranslator.getObjects()) {
+			if (m.getSoffidObject().toString().equals(SoffidObjectType.OBJECT_ROLE.toString())) {
+				ExtensibleObject o = new ExtensibleObject();
+				o.setObjectType(SoffidObjectType.OBJECT_ROLE.toString());
+				Object type = objectTranslator.generateAttribute("objectClass", o, m);
+				if (type != null && type.toString().toLowerCase().contains(desiredType.toLowerCase())) 
+					r .add(m);
+			}
+		}
+		return r;
 	}
 
 	public void removeUser(String userName) throws RemoteException,
@@ -1608,6 +1827,8 @@ public class CustomizableLDAPAgent extends Agent implements
 				objects = objectTranslator
 						.generateObjects(sourceObject);
 				removeObjects(objects, sourceObject);
+				if (smartGrant)
+					updateGrants(objects, new LinkedList<>());
 			} else {
 				AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
 						getServer());
@@ -1623,6 +1844,8 @@ public class CustomizableLDAPAgent extends Agent implements
 					objects = objectTranslator
 							.generateObjects(sourceObject);
 					updateObjects(userName, objects, sourceObject);
+					if (smartGrant)
+						updateGrants(objects, new LinkedList<>());
 				}
 			}
 		} catch (Exception e) {
