@@ -1671,12 +1671,17 @@ public class CustomizableLDAPAgent extends Agent implements
 	private void updateGrants(ExtensibleObjects objects, Collection<RolGrant> accountRoles, ExtensibleObjectMapping m,
 			String groupType, String groupAttribute, String userAttribute) throws InternalErrorException {
 		// Compute list of grants to add
+		HashMap<String,Rol> memberships = new HashMap<>();
 		HashSet<String> groups = new HashSet<>();
 		for (RolGrant grant: accountRoles) {
 			try {
 				Rol r = getServer().getRoleInfo(grant.getRolName(), getDispatcher().getCodi());
 				Object dn = objectTranslator.generateAttribute("dn", new RoleExtensibleObject(r, getServer()), m);
-				if (dn != null) groups.add(dn.toString().toLowerCase());
+				if (dn != null) {
+					String d = dn.toString().toLowerCase();
+					groups.add(d);
+					memberships.put(d, r);
+				}
 			} catch (UnknownRoleException e) {
 			}
 		}
@@ -1692,7 +1697,7 @@ public class CustomizableLDAPAgent extends Agent implements
 						removeGroups(conn, groupAttribute, userAttribute, value, groups, groups2);
 
 						for (String groupDN: groups2) {
-							addGroup(conn, groupDN, groupAttribute, value);
+							addGroup(conn, groupDN, groupAttribute, value, memberships.get(groupDN));
 						}
 					} finally {
 						pool.returnConnection();
@@ -1705,7 +1710,7 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 	}
 
-	private void addGroup(LDAPConnection conn, String groupDN, String groupAttribute, Object value) throws InternalErrorException, LDAPException {
+	private void addGroup(LDAPConnection conn, String groupDN, String groupAttribute, Object value, Rol rol) throws InternalErrorException, LDAPException, RemoteException {
 		LDAPEntry entry = null;
 		try {
 			entry = conn.read(groupDN, new String[] {groupAttribute});
@@ -1713,8 +1718,14 @@ public class CustomizableLDAPAgent extends Agent implements
 			if (e.getResultCode() != LDAPException.NO_SUCH_OBJECT)
 				throw e;
 		}
-		if (entry == null) 
-			throw new InternalErrorException("Group "+groupDN+" does not exist");
+		if (entry == null) {
+			updateRole(rol);
+			try {
+				entry = conn.read(groupDN, new String[] {groupAttribute});
+			} catch (LDAPException e) {
+				if (e.getResultCode() != LDAPException.NO_SUCH_OBJECT) return; 
+			}
+		}
 		if (debugEnabled) {
 			log.info("Adding member "+value.toString()+" to "+groupDN);
 		}
