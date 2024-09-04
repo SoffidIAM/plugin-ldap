@@ -1602,7 +1602,6 @@ public class CustomizableLDAPAgent extends Agent implements
 					}
 				}
 			}
-
 			return found;
 		} finally {
 			pool.returnConnection();
@@ -1670,6 +1669,8 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	private void updateGrants(ExtensibleObjects objects, Collection<RolGrant> accountRoles, ExtensibleObjectMapping m,
 			String groupType, String groupAttribute, String userAttribute) throws InternalErrorException {
+		if (debugEnabled)
+			log.info("Smart update of grants on "+m.getSystemObject()+" ("+ accountRoles.size()+")");
 		// Compute list of grants to add
 		HashMap<String,Rol> memberships = new HashMap<>();
 		HashSet<String> groups = new HashSet<>();
@@ -1697,6 +1698,8 @@ public class CustomizableLDAPAgent extends Agent implements
 						removeGroups(conn, groupType, groupAttribute, userAttribute, value, groups, groups2);
 
 						for (String groupDN: groups2) {
+							if (debugEnabled)
+								log.info("Adding to group "+groupDN);
 							addGroup(conn, groupDN, groupAttribute, value, memberships.get(groupDN));
 						}
 					} finally {
@@ -1745,13 +1748,15 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	protected void removeGroups(LDAPConnection conn, String groupType, String groupAttribute, String userAttribute, Object value,
 			HashSet<String> groups, HashSet groups2) throws LDAPException {
-		String queryString = "&(("+groupAttribute+"="+escapeLDAPSearchFilter(value.toString())+")"
+		String queryString = "(&("+groupAttribute+"="+escapeLDAPSearchFilter(value.toString())+")"
 				+ "(objectClass="+groupType+"))";
 		LDAPPagedResultsControl pageResult = null;
 		if (pagesize > 0) {
 			pageResult  = new LDAPPagedResultsControl(pagesize, false);
 		}
 
+		if (debugEnabled)
+			log.info("Searching query "+queryString+" on "+baseDN);
 		do {
 			LDAPSearchConstraints constraints = conn.getSearchConstraints();
 			if (pageResult != null) {
@@ -1760,11 +1765,13 @@ public class CustomizableLDAPAgent extends Agent implements
 			constraints.setMaxResults(0);
 
 			LDAPSearchResults query = conn.search(baseDN,
-					LDAPConnection.SCOPE_SUB, queryString, new String[] {groupAttribute}, false,
+					LDAPConnection.SCOPE_SUB, queryString, new String[] {"CN"}, false,
 							constraints);
 			while (query.hasMore()) {
 				try {
 					LDAPEntry entry = query.next();
+					if (debugEnabled)
+						log.info("Got "+entry.getDN());
 					if (! groups.contains(entry.getDN().toLowerCase()))
 						removeEntry(conn, entry, groupAttribute, value.toString());
 					else
@@ -1795,18 +1802,32 @@ public class CustomizableLDAPAgent extends Agent implements
 		if (debugEnabled) {
 			log.info("Removing member "+value.toString()+" from "+entry);
 		}
-		Enumeration values = entry.getAttribute(groupAttribute).getStringValues();
-		boolean empty = false;
-		if (!values.hasMoreElements()) empty = true;
-		else {
-			values.nextElement();
-			if (!values.hasMoreElements()) empty = true;
+		LDAPModification m = new LDAPModification(LDAPModification.DELETE, new LDAPAttribute(groupAttribute, value));
+		try {
+			conn.modify(entry.getDN(), m);
+		} catch (LDAPException e) {
+			entry = conn.read(entry.getDN());
+			if (e.getResultCode() == LDAPException.OBJECT_CLASS_VIOLATION &&
+					oneElement(entry.getAttribute(groupAttribute))) // One single element
+			{
+				m = new LDAPModification(LDAPModification.REPLACE, new LDAPAttribute(groupAttribute, 
+								groupAttribute.equalsIgnoreCase("memberUid") ? "-1": "cn=nobody,"+baseDN));
+				conn.modify(entry.getDN(), m);
+			}
+			else
+				throw e;
 		}
-		LDAPModification m = empty ?
-			new LDAPModification(LDAPModification.REPLACE, new LDAPAttribute(groupAttribute, 
-					groupAttribute.equalsIgnoreCase("memberUid") ? "-1": "cn=nobody,"+baseDN)) :
-			new LDAPModification(LDAPModification.DELETE, new LDAPAttribute(groupAttribute, value));
-		conn.modify(entry.getDN(), m);
+	}
+
+	private boolean oneElement(LDAPAttribute attribute) {
+		Enumeration enumeration = attribute.getStringValues();
+		if (!enumeration.hasMoreElements())
+			return true;
+		enumeration.nextElement();
+		if (!enumeration.hasMoreElements())
+			return true;
+		else
+			return false;
 	}
 
 	private List<ExtensibleObjectMapping> findGroupType(String desiredType) throws InternalErrorException {
