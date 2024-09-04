@@ -1694,7 +1694,7 @@ public class CustomizableLDAPAgent extends Agent implements
 					LDAPConnection conn = pool.getConnection();
 					try
 					{
-						removeGroups(conn, groupAttribute, userAttribute, value, groups, groups2);
+						removeGroups(conn, groupType, groupAttribute, userAttribute, value, groups, groups2);
 
 						for (String groupDN: groups2) {
 							addGroup(conn, groupDN, groupAttribute, value, memberships.get(groupDN));
@@ -1743,9 +1743,10 @@ public class CustomizableLDAPAgent extends Agent implements
 		conn.modify(entry.getDN(), m);
 	}
 
-	protected void removeGroups(LDAPConnection conn, String groupAttribute, String userAttribute, Object value,
+	protected void removeGroups(LDAPConnection conn, String groupType, String groupAttribute, String userAttribute, Object value,
 			HashSet<String> groups, HashSet groups2) throws LDAPException {
-		String queryString = "("+groupAttribute+"="+escapeLDAPSearchFilter(value.toString())+")";
+		String queryString = "&(("+groupAttribute+"="+escapeLDAPSearchFilter(value.toString())+")"
+				+ "(objectClass="+groupType+"))";
 		LDAPPagedResultsControl pageResult = null;
 		if (pagesize > 0) {
 			pageResult  = new LDAPPagedResultsControl(pagesize, false);
