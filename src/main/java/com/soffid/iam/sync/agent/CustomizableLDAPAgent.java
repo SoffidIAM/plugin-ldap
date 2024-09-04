@@ -1716,7 +1716,7 @@ public class CustomizableLDAPAgent extends Agent implements
 	private void addGroup(LDAPConnection conn, String groupDN, String groupAttribute, Object value, Rol rol) throws InternalErrorException, LDAPException, RemoteException {
 		LDAPEntry entry = null;
 		try {
-			entry = conn.read(groupDN, new String[] {groupAttribute});
+			entry = conn.read(groupDN, new String[] {"cn"});
 		} catch (LDAPException e) {
 			if (e.getResultCode() != LDAPException.NO_SUCH_OBJECT)
 				throw e;
@@ -1732,17 +1732,8 @@ public class CustomizableLDAPAgent extends Agent implements
 		if (debugEnabled) {
 			log.info("Adding member "+value.toString()+" to "+groupDN);
 		}
-		LDAPAttribute att = entry.getAttribute(groupAttribute);
-		Enumeration values = att.getStringValues();
-		String v = (String) values.nextElement();
 		LDAPModification m;
-		if (!values.hasMoreElements() && (
-				(v.equalsIgnoreCase("cn=nobody,"+baseDN) && groupAttribute.equalsIgnoreCase("member"))
-			||  (v.equalsIgnoreCase("cn=nobody,"+baseDN) && groupAttribute.equalsIgnoreCase("uniqueMember"))
-			||  (v.equalsIgnoreCase("-1") && groupAttribute.equalsIgnoreCase("memberUid"))))
-			m = new LDAPModification(LDAPModification.REPLACE, new LDAPAttribute(groupAttribute, value.toString()));
-		else
-			m = new LDAPModification(LDAPModification.ADD, new LDAPAttribute(groupAttribute, value.toString()));
+		m = new LDAPModification(LDAPModification.ADD, new LDAPAttribute(groupAttribute, value.toString()));
 		conn.modify(entry.getDN(), m);
 	}
 
