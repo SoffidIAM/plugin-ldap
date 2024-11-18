@@ -542,10 +542,9 @@ public class CustomizableLDAPAgent extends Agent implements
 							}
 							if (debugEnabled)
 								log.info("================================================");
-							int i = dn.indexOf(",");
-							if (i > 0) {
-								String parentName = dn.substring(i + 1);
-								createParents(parentName);
+							String[] splitDn = splitDN(dn);
+							if (splitDn.length > 0) {
+								createParents(splitDn, 1);
 							}
 							entry = new LDAPEntry(dn, attributeSet);
 							try {
@@ -629,15 +628,14 @@ public class CustomizableLDAPAgent extends Agent implements
 								if (rename) {
 									if (debugEnabled)
 										log.info("Renaming from "+entry.getDN()+" to "+dn);
-									int i = dn.indexOf(",");
-									if (i > 0) {
-										String parentName = dn.substring(i + 1);
-										createParents(parentName);
+									String[] parts = splitDN(dn);
+									if (parts.length > 0) {
+										createParents(parts, 1);
 
 										LDAPConnection conn = pool.getConnection();
 										try {
 											conn.rename(entry.getDN(),
-													dn.substring(0, i), parentName,
+													parts[0], joinDnParts(parts, 1),
 													true);
 										} finally {
 											pool.returnConnection();
@@ -1065,8 +1063,9 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	}
 
-	private void createParents(String dn) throws Exception {
-		if (dn.equals(baseDN))
+	private void createParents(String[] parts, int p) throws Exception {
+		String dn = joinDnParts(parts, p);
+		if (dn == null || dn.equals(baseDN))
 			return;
 
 		boolean found = false;
@@ -1083,30 +1082,34 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 
 		if (!found) {
-			int i = dn.indexOf(",");
-			if (i > 0) {
-				String parentName = dn.substring(i + 1);
-				createParents(parentName);
-				LDAPAttributeSet attributeSet = new LDAPAttributeSet();
-				int j = dn.substring(i).indexOf("=");
-				String name = dn.substring(j, i);
-				if (dn.toLowerCase().startsWith("ou=")) {
-					attributeSet.add(new LDAPAttribute("objectclass",
-							"organizationalUnit"));
-					attributeSet.add(new LDAPAttribute("ou", name));
-				} else {
-					throw new InternalErrorException("Unable to create object "
-							+ dn);
-				}
-				LDAPEntry entry = new LDAPEntry(dn, attributeSet);
-				try {
-					log.info("Creating " + dn);
-					pool.getConnection().add(entry);
-				} finally {
-					pool.returnConnection();
-				}
+			createParents(parts, p+1);
+			LDAPAttributeSet attributeSet = new LDAPAttributeSet();
+			if (dn.toLowerCase().startsWith("ou=")) {
+				attributeSet.add(new LDAPAttribute("objectclass",
+						"organizationalUnit"));
+				String name = parts[p].substring(3);
+				attributeSet.add(new LDAPAttribute("ou", name));
+			} else {
+				throw new InternalErrorException("Unable to create object "
+						+ dn);
+			}
+			LDAPEntry entry = new LDAPEntry(dn, attributeSet);
+			try {
+				log.info("Creating " + dn);
+				pool.getConnection().add(entry);
+			} finally {
+				pool.returnConnection();
 			}
 		}
+	}
+
+	protected String joinDnParts(String[] parts, int p) {
+		String dn = null;
+		for (int i = p; i < parts.length; i++) {
+			if (dn == null) dn = parts[i];
+			else dn = dn + ","+parts[i];
+		}
+		return dn;
 	}
 
 	LinkedList<ExtensibleObject> getLdapObjects(SoffidObjectType type,
