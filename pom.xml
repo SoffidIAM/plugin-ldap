@@ -13,9 +13,9 @@
 	<version>2.8.1-SNAPSHOT</version>
 	<dependencies>
 		<dependency>
-			<groupId>com.novell.ldap</groupId>
+			<groupId>com.soffid.openldap</groupId>
 			<artifactId>jldap</artifactId>
-			<version>2009.10.07-1</version>
+			<version>4.7.1</version>
 		</dependency>
 		<dependency>
 			<groupId>com.soffid.iam.sync</groupId>
@@ -67,7 +67,7 @@
 						<configuration>
 							<artifactSet>
 								<includes>
-									<include>com.novell.ldap:jldap</include>
+									<include>com.soffid.openldap:jldap</include>
 								</includes>
 							</artifactSet>
 						</configuration>
