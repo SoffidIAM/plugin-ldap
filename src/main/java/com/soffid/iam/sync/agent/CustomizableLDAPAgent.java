@@ -26,6 +26,8 @@ import javax.management.Attribute;
 import com.novell.ldap.LDAPAttribute;
 import com.novell.ldap.LDAPAttributeSchema;
 import com.novell.ldap.LDAPAttributeSet;
+import com.novell.ldap.LDAPAuthHandler;
+import com.novell.ldap.LDAPAuthProvider;
 import com.novell.ldap.LDAPConnection;
 import com.novell.ldap.LDAPConstraints;
 import com.novell.ldap.LDAPControl;
@@ -1915,6 +1917,7 @@ public class CustomizableLDAPAgent extends Agent implements
 	public boolean validateUserPassword(String user, Password password)
 			throws RemoteException, InternalErrorException {
 		Account acc = new Account();
+		log.info("Checking password for "+user);
 		acc.setName(user);
 		acc.setDescription(user);
 		acc.setDispatcher(getDispatcher().getCodi());
@@ -1931,24 +1934,51 @@ public class CustomizableLDAPAgent extends Agent implements
 							getServer()));
 		}
 		for (ExtensibleObject entry : entries.getObjects()) {
+			String dnlog = user;
 			try {
 				LDAPEntry ldapEntry = buscarUsuario(entry);
 				String dn = ldapEntry == null ? 
 						vom.toSingleString(entry.getAttribute("dn")) :
 					ldapEntry.getDN();
+				dnlog = dn;
 				if (dn != null) {
-					LDAPConnection conn2 = new LDAPConnection();
-					conn2.connect(ldapHost, ldapPort);
+					LDAPConnection conn2;
+					if (ssl)
+						conn2 = new LDAPConnection(new LDAPJSSESecureSocketFactory());
+					else
+						conn2 = new LDAPConnection();
+					conn2.setSocketTimeOut(60_000);
+					LDAPConstraints constraints = conn2.getConstraints();
+					constraints.setReferralFollowing(true);
+					constraints.setReferralHandler(new LDAPAuthHandler()
+					{
+						public LDAPAuthProvider getAuthProvider (String host, int port)
+						{
+							try
+							{
+								if (debugEnabled)
+									log.warn("Authenticating against "+host+":"+port+" with "+dn);
+								return new LDAPAuthProvider(dn, password.getPassword()
+										.getBytes("UTF-8"));
+							}
+							catch (UnsupportedEncodingException e)
+							{
+								return new LDAPAuthProvider(loginDN, password.getPassword()
+										.getBytes());
+							}
+						}
+					});
+					conn2.setConstraints(constraints);
 					if (debugEnabled)
-						log.info("Connecting to "+ldapHost+":"+ldapPort+" with DN "+dn);
+						log.info("Connecting to " + (ssl ? "ldaps://": "ldap://") +ldapHost+":"+ldapPort+" as "+dn);
+					conn2.connect(ldapHost, ldapPort);
 					conn2.bind(ldapVersion, dn, password.getPassword()
 							.getBytes("UTF8"));
 					conn2.disconnect();
 					return true;
 				}
 			} catch (Exception e) {
-				log.info("Error connecting as user " + user + ":"
-						+ e.toString());
+				log.info("Error connecting as user " + dnlog, e);
 			}
 		}
 		return false;

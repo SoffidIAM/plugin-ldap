@@ -2,6 +2,9 @@ package com.soffid.iam.sync.agent;
 
 import java.io.UnsupportedEncodingException;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import com.novell.ldap.LDAPAuthHandler;
 import com.novell.ldap.LDAPAuthProvider;
 import com.novell.ldap.LDAPConnection;
@@ -14,7 +17,7 @@ import es.caib.seycon.ng.exception.InternalErrorException;
 import es.caib.seycon.ng.sync.engine.pool.AbstractPool;
 
 public class LDAPPool extends AbstractPool<LDAPConnection> {
-
+	Log log = LogFactory.getLog(getClass());
 	String loginDN;
 	Password password;
 	private String ldapHost;
@@ -126,6 +129,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 				{
 					try
 					{
+//						log.info("Authenticating against "+host+":"+port);
 						return new LDAPAuthProvider(loginDN+ ", " + baseDN, password.getPassword()
 								.getBytes("UTF-8"));
 					}
@@ -137,7 +141,9 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 				}
 			});
 			conn.setConstraints(constraints);
+//			log.info("Connecting to " + (isSsl() ? "ldaps://": "ldap://") +ldapHost+":"+ldapPort);
 			conn.connect(ldapHost, ldapPort);
+//			log.info("Binding as " + loginDN);
 			conn.bind(ldapVersion, loginDN , password.getPassword()
 					.getBytes("UTF8"));
 		}
