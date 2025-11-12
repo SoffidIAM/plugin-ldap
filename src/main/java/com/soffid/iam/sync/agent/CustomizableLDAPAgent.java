@@ -927,7 +927,17 @@ public class CustomizableLDAPAgent extends Agent implements
 				}
 			}
 		}
-
+		
+		for (ExtensibleObjectMapping map: objectMappings) {
+			if (map.getSystemObject().equals(objectQuery.getObjectType())) {
+				String q = map.getProperties().get("ldapFilter");
+				if (q != null && !q.trim().isEmpty()) {
+					buf.append(q);
+					attributes ++;
+				}
+			}
+		}
+		
 		if (attributes > 1)
 		{
 			buf.insert(0, "(&");
