@@ -1,5 +1,6 @@
 package com.soffid.iam.sync.agent;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Array;
 import java.rmi.RemoteException;
@@ -44,6 +45,7 @@ import com.novell.ldap.controls.LDAPPagedResultsResponse;
 import com.soffid.iam.api.Group;
 import com.soffid.iam.api.HostService;
 import com.soffid.iam.api.PasswordValidation;
+import com.soffid.iam.remote.RemoteServiceLocator;
 import com.soffid.iam.sync.intf.GroupMgr;
 
 import es.caib.seycon.ng.comu.Account;
@@ -648,6 +650,8 @@ public class CustomizableLDAPAgent extends Agent implements
 							postUpdate(soffidObject, obj, entry);
 						}
 					}
+				} else {
+					log.info("Object is not syncronized because DN is empty");
 				}
 			} catch (Exception e) {
 				String msg = "updating object : " + dn;
@@ -1533,22 +1537,25 @@ public class CustomizableLDAPAgent extends Agent implements
 			throws Exception {
 		LDAPConnection conn = pool.getConnection();
 		try {
+			
 			boolean found = false;
 			ExtensibleObject rolObject = new ExtensibleObject();
 			rolObject.setObjectType(SoffidObjectType.OBJECT_ROLE.getValue());
 			// /
-			Map<String, Object> userMap = new HashMap<String, Object>();
-			userMap.put("accountName", userAccount);
-			userMap.put("system", getDispatcher().getCodi());
-			List<Map<String, Object>> userMapList = new LinkedList<Map<String, Object>>();
-			userMapList.add(userMap);
-			rolObject.setAttribute("allGrantedAccounts", userMapList);
-			rolObject.setAttribute("grantedAccounts", userMapList);
-			List<String> accountNames = new LinkedList<String>();
-			accountNames.add(userAccount);
-			rolObject.setAttribute("allGrantedAccountNames", accountNames);
-			rolObject.setAttribute("grantedAccountNames", accountNames);
-
+			if (!smartGrant) {
+				Map<String, Object> userMap = new HashMap<String, Object>();
+				userMap.put("accountName", userAccount);
+				userMap.put("system", getDispatcher().getCodi());
+				List<Map<String, Object>> userMapList = new LinkedList<Map<String, Object>>();
+				userMapList.add(userMap);
+				rolObject.setAttribute("allGrantedAccounts", userMapList);
+				rolObject.setAttribute("grantedAccounts", userMapList);
+				List<String> accountNames = new LinkedList<String>();
+				accountNames.add(userAccount);
+				rolObject.setAttribute("allGrantedAccountNames", accountNames);
+				rolObject.setAttribute("grantedAccountNames", accountNames);
+			}
+			
 			if (debugEnabled || isDebug())
 				debugObject("Searching grants from role object", rolObject, "");
 			// Generate a dummy object to perform query
@@ -1556,6 +1563,33 @@ public class CustomizableLDAPAgent extends Agent implements
 				if (objectMapping.getSoffidObject().equals(
 						SoffidObjectType.OBJECT_ROLE)) {
 					ExtensibleObject systemObject = objectTranslator.generateObject(rolObject, objectMapping);
+					if (smartGrant) {
+						log.info("Doing smart search of groups");
+						ExtensibleObject userObject = findExtensibleUser(userAccount);
+						debugObject("Member object", userObject, "");
+						Object cl = systemObject.get("objectClass");
+						if (cl == null)
+							throw new InternalErrorException("objectClass cannot be null for a dummy role");
+						if (cl.getClass().isArray()) {
+							for (int i = 0; i < Array.getLength(cl); i++) {
+								String oc = (String) Array.get(cl, i);
+								if (oc != null) {
+									addMemberSample(systemObject, userObject, oc);
+								}
+							}
+						}
+						else if (cl instanceof Collection) {
+							for (Object clName: (Collection) cl) {
+								if (clName != null)
+									addMemberSample(systemObject, userObject, (String) clName);
+							}
+						}
+						else {
+							addMemberSample(systemObject, userObject, vom.toSingleString(cl));
+						}
+						
+						
+					}
 					StringBuffer sb = new StringBuffer();
 	
 					if (debugEnabled || isDebug())
@@ -1623,17 +1657,38 @@ public class CustomizableLDAPAgent extends Agent implements
 		}
 	}
 
+	private void addMemberSample(ExtensibleObject systemObject, Map<String, Object> userMap, String clName) {
+		if (clName.equalsIgnoreCase("groupOfNames"))
+		{
+			systemObject.put("member", userMap.get("dn"));
+		}
+		if (clName.equalsIgnoreCase("groupOfUniqueNames"))
+		{
+			systemObject.put("uniqueMember", userMap.get("dn"));
+		}
+		if (clName.equalsIgnoreCase("posixGroup"))
+		{
+			systemObject.put("memberUid", userMap.get("uid"));
+		}
+			
+	}
+
 	public void updateUser(String userName, Usuari userData)
 			throws RemoteException, InternalErrorException {
-		Account account = new Account();
-		account.setName(userName);
-		account.setDescription(userData.getFullName());
-		account.setDisabled(false);
-		account.setDispatcher(getDispatcher().getCodi());
+		Account account = getServer().getAccountInfo(userName, getCodi());
+		if (account == null) {
+			account = new Account();
+			account.setName(userName);
+			account.setDescription(userData.getFullName());
+			account.setDisabled(true);
+			account.setDispatcher(getDispatcher().getCodi());			
+		}
 		UserExtensibleObject sourceObject = new UserExtensibleObject(account, userData,
 				getServer());
+		log.info("Update user "+userName);
 		ExtensibleObjects objects = objectTranslator
 				.generateObjects(sourceObject);
+		log.info("Generated: "+objects.getObjects().size());
 		try {
 			updateObjects(userName, objects, sourceObject);
 			if (smartGrant)
@@ -1701,6 +1756,7 @@ public class CustomizableLDAPAgent extends Agent implements
 			} catch (UnknownRoleException e) {
 			}
 		}
+		log.info("Roles = "+groups);
 		for (ExtensibleObject obj: objects.getObjects()) {
 			Object value = obj.get(userAttribute);
 			if (value != null) {
@@ -1996,6 +2052,7 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	public void updateRole(Rol rol) throws RemoteException,
 			InternalErrorException {
+		log.info("Updating "+rol);
 		if (!getCodi().equals(rol.getBaseDeDades()))
 			return;
 		RoleExtensibleObject sourceObject = new RoleExtensibleObject(rol, getServer());
