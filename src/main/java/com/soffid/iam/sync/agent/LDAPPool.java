@@ -163,7 +163,7 @@ public class LDAPPool extends AbstractPool<LDAPConnection> {
 	@Override
 	protected boolean isConnectionValid(LDAPConnection connection)
 			throws Exception {
-		return connection.isConnectionAlive();
+		return connection.isConnected() && connection.isConnectionAlive();
 	}
 
 	@Override
