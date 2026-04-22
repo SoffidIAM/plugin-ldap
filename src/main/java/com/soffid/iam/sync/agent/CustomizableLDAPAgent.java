@@ -42,6 +42,7 @@ import com.novell.ldap.LDAPSearchConstraints;
 import com.novell.ldap.LDAPSearchResults;
 import com.novell.ldap.controls.LDAPPagedResultsControl;
 import com.novell.ldap.controls.LDAPPagedResultsResponse;
+import com.soffid.iam.api.AccountStatus;
 import com.soffid.iam.api.Group;
 import com.soffid.iam.api.HostService;
 import com.soffid.iam.api.PasswordValidation;
@@ -315,7 +316,7 @@ public class CustomizableLDAPAgent extends Agent implements
 							debugModifications("Modifying password ", ldapUser.getDN(), mods);
 							if (prePassword(soffidObject, object, ldapUser)) {
 								try {
-									pool.getConnection().modify(dn, mods);
+									pool.getConnection().modify(ldapUser.getDN(), mods);
 								} finally {
 									pool.returnConnection();
 								}
@@ -1702,6 +1703,7 @@ public class CustomizableLDAPAgent extends Agent implements
 
 	public void updateUser(String accountName, String description)
 			throws RemoteException, InternalErrorException {
+		boolean remove = false;
 		Account account = getServer().getAccountInfo(accountName, getCodi());
 		if (account == null) {
 			account = new Account();
@@ -1709,15 +1711,24 @@ public class CustomizableLDAPAgent extends Agent implements
 			account.setDescription(description);
 			account.setDisabled(true);
 			account.setDispatcher(getDispatcher().getCodi());			
+			remove = true;
+		} else {
+			remove = account.getStatus() == AccountStatus.REMOVED;
 		}
 		AccountExtensibleObject sourceObject = new AccountExtensibleObject(account,
 				getServer());
 		ExtensibleObjects objects = objectTranslator
 				.generateObjects(sourceObject);
 		try {
-			updateObjects(accountName, objects, sourceObject);
-			if (smartGrant)
-				updateGrants(objects, getServer().getAccountRoles(accountName, getDispatcher().getCodi()));
+			if (remove) {
+				removeObjects(objects, sourceObject);
+				if (smartGrant)
+					updateGrants(objects, new LinkedList<RolGrant>());
+			} else {
+				updateObjects(accountName, objects, sourceObject);
+				if (smartGrant)
+					updateGrants(objects, getServer().getAccountRoles(accountName, getDispatcher().getCodi()));
+			}
 		} catch (InternalErrorException e) {
 			throw e;
 		} catch (Exception e) {
