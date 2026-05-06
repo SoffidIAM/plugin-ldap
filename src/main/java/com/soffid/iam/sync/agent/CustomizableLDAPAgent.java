@@ -872,8 +872,11 @@ public class CustomizableLDAPAgent extends Agent implements
 				log.info("Performing query " + buf.toString());
 			try {
 				Collection<ExtensibleObject> objs = new LinkedList<ExtensibleObject>();
+				LDAPSearchConstraints constraints = conn.getSearchConstraints();
+				constraints.setMaxResults(Integer.MAX_VALUE);
 				LDAPSearchResults query = conn.search(baseDN,
-						LDAPConnection.SCOPE_SUB, buf.toString(), null, false);
+						LDAPConnection.SCOPE_SUB, buf.toString(), null, false,
+						constraints);
 				while (query.hasMore()) {
 					try {
 						LDAPEntry entry = query.next();
@@ -1006,7 +1009,7 @@ public class CustomizableLDAPAgent extends Agent implements
 								log.info("Setting pageResult cooking "+pageResult.getCookie());
 								constraints.setControls(pageResult);
 							}
-							constraints.setMaxResults(0);
+							constraints.setMaxResults(Integer.MAX_VALUE);
 //							conn.setConstraints(constraints);
 							conn.setSocketTimeOut(1200000); // Twenty minutes
 							String key = mapping.getProperties().get("key");
@@ -1180,7 +1183,7 @@ public class CustomizableLDAPAgent extends Agent implements
 									.getSearchConstraints();
 							if (pageResult != null)
 								constraints.setControls(pageResult);
-							constraints.setMaxResults(0);
+							constraints.setMaxResults(Integer.MAX_VALUE);
 //							lc.setConstraints(constraints);
 
 							log.debug("Searching for " + sb.toString() + " on "
@@ -1601,10 +1604,13 @@ public class CustomizableLDAPAgent extends Agent implements
 							log.info("Performing query " + sb.toString());
 						String keyAttribute=objectMapping.getProperties().get("key");
 						String[] atts = keyAttribute == null ? null: new String[] {keyAttribute};
+						LDAPSearchConstraints constraints = conn.getSearchConstraints();
+						constraints.setMaxResults(Integer.MAX_VALUE);
 						LDAPSearchResults search = conn.search(baseDN,
 								LDAPConnection.SCOPE_SUB, sb.toString(),
 								atts,
-								false);
+								false, 
+								constraints);
 						if (debugEnabled || isDebug())
 							log.info("Executing query "+sb.toString());
 						while (search.hasMore()) {
@@ -1835,7 +1841,7 @@ public class CustomizableLDAPAgent extends Agent implements
 			if (pageResult != null) {
 				constraints.setControls(pageResult);
 			}
-			constraints.setMaxResults(0);
+			constraints.setMaxResults(Integer.MAX_VALUE);
 
 			LDAPSearchResults query = conn.search(baseDN,
 					LDAPConnection.SCOPE_SUB, queryString, new String[] {"CN"}, false,
@@ -2504,6 +2510,7 @@ public class CustomizableLDAPAgent extends Agent implements
 				LinkedList<Map<String, Object>> result = new LinkedList<Map<String,Object>>();
 				
 				LDAPSearchConstraints constraints = new LDAPSearchConstraints(conn.getConstraints());
+				constraints.setMaxResults(Integer.MAX_VALUE);
 				LDAPSearchResults query = conn.search(base,
 							LDAPConnection.SCOPE_SUB, queryString, null, false,
 							constraints);
